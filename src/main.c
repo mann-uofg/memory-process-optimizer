@@ -8,6 +8,7 @@
 // --- CONFIGURATION ---
 #define MAX_TRACKED_APPS 5
 #define FREEZE_TIMEOUT_SEC 10
+#define MIN_MEMORY_MB 50
 
 // --- CROSS-PLATFORM SLEEP ---
 #ifdef _WIN32
@@ -106,6 +107,17 @@ void check_for_idlers() {
         if (!history[i].valid) continue;
         if (history[i].is_frozen) continue; 
         if (history[i].pid == active_pid) continue; 
+
+        // 1. Check Memory Usage (Skipping if below threshold)
+        uint64_t mem_bytes = os_get_memory_usage(history[i].pid);
+        double mem_mb = (double)mem_bytes / (1024 * 1024);
+
+        // 2. The Gatekeeper: If it's too small, skip it.
+        if (mem_mb < MIN_MEMORY_MB) {
+            // Printing this once so we know why it's ignored
+            printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
+            continue;
+        }
 
         double seconds_inactive = difftime(now, history[i].last_active_time);
 
