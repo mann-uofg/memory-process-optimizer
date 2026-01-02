@@ -3,6 +3,7 @@
 #include <time.h>
 #include <string.h>
 #include <ctype.h> // for string comparison
+#include <signal.h>
 #include "os_interface.h"
 
 // --- CONFIGURATION ---
@@ -132,8 +133,27 @@ void check_for_idlers() {
     }
 }
 
+void handle_exit(int sig) {
+    printf("\n\n[!] CAUGHT EXIT SIGNAL (%d). Cleaning up...\n", sig);
+
+    // Thaw every process we are tracking
+    for (int i = 0; i < MAX_TRACKED_APPS; i++) {
+        if (history[i].valid && history[i].is_frozen) {
+            printf("[RESTORE] Emergency Thaw: %s (PID %d)\n", history[i].name, history[i].pid);
+            os_thaw_process(history[i].pid);
+            history[i].is_frozen = false;
+        }
+    }
+
+    printf("[DONE] All processes restored. Exiting safely. Bye!\n");
+    exit(0); // now we can actually die lol
+}
+
 // --- MAIN LOOP ---
 int main() {
+
+    signal(SIGINT, handle_exit);
+
     printf("========================================\n");
     printf("   MacNap - OS Interface MODE\n");
     printf("   (Safety Filters Active)\n");
