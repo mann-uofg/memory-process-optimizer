@@ -9,9 +9,14 @@
 // --- CONFIGURATION DEFAULTS ---
 #define MAX_TRACKED_APPS 7
 #define CONFIG_FILENAME "macnap.conf"
+
 // These are now variables, not constants, so we can change them at runtime!
 int config_timeout = 10;      // seconds
 int config_min_memory = 50;   // MB
+
+// Session Statistics
+int stats_frozen_count = 0;
+uint64_t stats_ram_saved_mb = 0;
 
 // --- CROSS-PLATFORM SLEEP ---
 #ifdef _WIN32
@@ -139,6 +144,11 @@ void check_for_idlers() {
             
             if (os_freeze_process(history[i].pid) == 0) {
                 history[i].is_frozen = true;
+
+                // Update Statistics
+                stats_frozen_count++;
+                stats_ram_saved_mb += (uint64_t)mem_mb;
+                printf("        (Score: %d freezes | +%.0f MB saved)\n", stats_frozen_count, mem_mb);
             }
         }
     }
@@ -146,8 +156,16 @@ void check_for_idlers() {
 
 // --- SIGNAL HANDLER ---
 void handle_exit(int sig) {
-    printf("\n\n[!] CAUGHT EXIT SIGNAL (%d). Cleaning up...\n", sig);
+    printf("\n\n");
+    printf("========================================\n");
+    printf("   SESSION REPORT 📊\n");
+    printf("========================================\n");
+    printf("   Apps Frozen:    %d\n", stats_frozen_count);
+    printf("   RAM Reclaimed:  %llu MB\n", stats_ram_saved_mb); // %llu for 64-bit int
+    printf("========================================\n");
+    printf("   Cleaning up...\n\n");
 
+    // Thaw every process we are tracking
     for (int i = 0; i < MAX_TRACKED_APPS; i++) {
         if (history[i].valid && history[i].is_frozen) {
             printf("[RESTORE] Emergency Thaw: %s (PID %d)\n", history[i].name, history[i].pid);
@@ -156,7 +174,7 @@ void handle_exit(int sig) {
         }
     }
 
-    printf("[DONE] All processes restored. Exiting safely. Bye!\n");
+    printf("[DONE] All Processes Restored. Exiting safely. Bye!\n\n");
     exit(0);
 }
 
