@@ -7,7 +7,7 @@
 #include "os_interface.h"
 
 // --- CONFIGURATION ---
-#define MAX_TRACKED_APPS 5
+#define MAX_TRACKED_APPS 7
 #define FREEZE_TIMEOUT_SEC 10
 #define MIN_MEMORY_MB 50
 
@@ -38,6 +38,7 @@ bool is_critical_process(const char* name) {
     const char* blacklist[] = {
         "Finder",
         "Dock",
+        "Electron",    // Many apps use Electron as a base
         "WindowServer",
         "loginwindow",
         "kernel_task",
@@ -88,6 +89,15 @@ void update_app_activity(int32_t pid) {
 
     // 4. If new, add it to the list
     static int next_slot = 0;
+
+    // Eviction Logic
+    //Before we use this slot, check if we are about to overwrite a frozen app.
+    // If we simply overwrite it, we lose the PID and can never thaw it again.
+    if (history[next_slot].valid && history[next_slot].is_frozen) {
+        printf("[WARN] History full! Evicting frozen app %s (PID %d). Thawing it first...\n", history[next_slot].name, history[next_slot].pid);
+        os_thaw_process(history[next_slot].pid);
+        history[next_slot].is_frozen = false;
+    }
     
     printf("[INFO] Tracking new app: %s (PID %d)\n", name, pid);
     
