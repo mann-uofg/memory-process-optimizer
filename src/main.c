@@ -2,14 +2,15 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
-#include <ctype.h> // for string comparison
+#include <ctype.h>
 #include <signal.h>
 #include "os_interface.h"
 
-// --- CONFIGURATION ---
+// --- CONFIGURATION DEFAULTS ---
 #define MAX_TRACKED_APPS 7
-#define FREEZE_TIMEOUT_SEC 10
-#define MIN_MEMORY_MB 50
+// These are now variables, not constants, so we can change them at runtime!
+int config_timeout = 10;      // seconds
+int config_min_memory = 50;   // MB
 
 // --- CROSS-PLATFORM SLEEP ---
 #ifdef _WIN32
@@ -31,26 +32,30 @@ typedef struct {
 
 AppState history[MAX_TRACKED_APPS];
 
+// --- HELPER: INPUT CLEANING ---
+// Clears the "Enter" key or garbage from the input buffer
+void clear_input_buffer() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+}
+
 // --- CRITICAL SAFETY FILTER ---
-// Returns true if the app is too important to freeze
 bool is_critical_process(const char* name) {
-    // List of apps that will crash your Mac if you freeze them
     const char* blacklist[] = {
         "Finder",
         "Dock",
-        "Electron",    // Many apps use Electron as a base
+        "Electron",
         "WindowServer",
         "loginwindow",
         "kernel_task",
-        "MacNap",       // Don't freeze yourself
-        "Terminal",     // Don't freeze your own interface
+        "MacNap",
+        "Terminal",
         "iTerm2",
-        "Code",         // Don't freeze your IDE while coding!
+        "Code",
         NULL
     };
 
     for (int i = 0; blacklist[i] != NULL; i++) {
-        // Check if the name contains the blacklisted word
         if (strstr(name, blacklist[i]) != NULL) {
             return true;
         }
@@ -58,26 +63,22 @@ bool is_critical_process(const char* name) {
     return false;
 }
 
-// --- HELPER FUNCTIONS ---
+// --- CORE LOGIC ---
 
 void update_app_activity(int32_t pid) {
-    // 1. Get the name first so we can check if it's safe
     char name[MAX_PROC_NAME];
     os_get_process_name(pid, name, MAX_PROC_NAME);
 
-    // 2. SAFETY CHECK
+    // SAFETY CHECK
     if (is_critical_process(name)) {
-        // Silently ignore system processes so we don't crash the PC
         return; 
     }
 
-    // 3. Check if we already know this app
+    // Check existing
     for (int i = 0; i < MAX_TRACKED_APPS; i++) {
         if (history[i].valid && history[i].pid == pid) {
-            // FOUND IT!
             history[i].last_active_time = time(NULL); 
             
-            // If it was frozen, THAW IT immediately!
             if (history[i].is_frozen) {
                 printf("[ACTION] Welcome back, %s (PID %d). Thawing...\n", history[i].name, pid);
                 os_thaw_process(pid);
@@ -87,14 +88,12 @@ void update_app_activity(int32_t pid) {
         }
     }
 
-    // 4. If new, add it to the list
+    // Add new (Smart Eviction)
     static int next_slot = 0;
 
-    // Eviction Logic
-    //Before we use this slot, check if we are about to overwrite a frozen app.
-    // If we simply overwrite it, we lose the PID and can never thaw it again.
     if (history[next_slot].valid && history[next_slot].is_frozen) {
-        printf("[WARN] History full! Evicting frozen app %s (PID %d). Thawing it first...\n", history[next_slot].name, history[next_slot].pid);
+        printf("[WARN] History full! Evicting frozen app %s (PID %d). Thawing it first...\n", 
+               history[next_slot].name, history[next_slot].pid);
         os_thaw_process(history[next_slot].pid);
         history[next_slot].is_frozen = false;
     }
@@ -119,20 +118,21 @@ void check_for_idlers() {
         if (history[i].is_frozen) continue; 
         if (history[i].pid == active_pid) continue; 
 
-        // 1. Check Memory Usage (Skipping if below threshold)
+        // 1. Check Memory Usage
         uint64_t mem_bytes = os_get_memory_usage(history[i].pid);
         double mem_mb = (double)mem_bytes / (1024 * 1024);
 
-        // 2. The Gatekeeper: If it's too small, skip it.
-        if (mem_mb < MIN_MEMORY_MB) {
-            // Printing this once so we know why it's ignored
-            printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
+        // 2. The Gatekeeper (Using USER CONFIG variable now)
+        if (mem_mb < config_min_memory) {
+            // Uncomment below if you want to see debug logs for small apps
+            // printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
             continue;
         }
 
         double seconds_inactive = difftime(now, history[i].last_active_time);
 
-        if (seconds_inactive > FREEZE_TIMEOUT_SEC) {
+        // 3. The Timeout (Using USER CONFIG variable now)
+        if (seconds_inactive > config_timeout) {
             printf("[Interface] %s (PID %d) inactive for %.0fs. Freezing!\n", 
                    history[i].name, history[i].pid, seconds_inactive);
             
@@ -143,10 +143,10 @@ void check_for_idlers() {
     }
 }
 
+// --- SIGNAL HANDLER ---
 void handle_exit(int sig) {
     printf("\n\n[!] CAUGHT EXIT SIGNAL (%d). Cleaning up...\n", sig);
 
-    // Thaw every process we are tracking
     for (int i = 0; i < MAX_TRACKED_APPS; i++) {
         if (history[i].valid && history[i].is_frozen) {
             printf("[RESTORE] Emergency Thaw: %s (PID %d)\n", history[i].name, history[i].pid);
@@ -156,19 +156,50 @@ void handle_exit(int sig) {
     }
 
     printf("[DONE] All processes restored. Exiting safely. Bye!\n");
-    exit(0); // now we can actually die lol
+    exit(0);
 }
 
 // --- MAIN LOOP ---
 int main() {
-
+    // 1. Register the Safety Trap
     signal(SIGINT, handle_exit);
 
+    // 2. Interactive Menu
+    printf("\n");
     printf("========================================\n");
-    printf("   MacNap - OS Interface MODE\n");
-    printf("   (Safety Filters Active)\n");
+    printf("   MacNap - CONFIGURATION MENU\n");
     printf("========================================\n");
+    
+    int input_val;
 
+    // Ask for Timeout
+    printf("[1] Enter Freeze Timeout (Seconds) [Default: 10]: ");
+    if (scanf("%d", &input_val) == 1 && input_val > 0) {
+        config_timeout = input_val;
+    } else {
+        printf("    -> Using Default: 10s\n");
+        clear_input_buffer(); // Clear invalid input
+    }
+
+    // Ask for RAM Threshold
+    printf("[2] Enter Minimum RAM to Freeze (MB) [Default: 50]: ");
+    if (scanf("%d", &input_val) == 1 && input_val > 0) {
+        config_min_memory = input_val;
+    } else {
+        printf("    -> Using Default: 50MB\n");
+        clear_input_buffer();
+    }
+
+    // Summary
+    printf("\n");
+    printf("----------------------------------------\n");
+    printf("   🚀 STARTING ENGINE...\n");
+    printf("   > Target: Apps idle for > %d seconds\n", config_timeout);
+    printf("   > Filter: Apps using > %d MB RAM\n", config_min_memory);
+    printf("----------------------------------------\n");
+    printf("   (Press Ctrl+C to Stop Safely)\n\n");
+
+    // 3. Start the Loop
     while (1) {
         int32_t current_pid = os_get_active_pid();
 
