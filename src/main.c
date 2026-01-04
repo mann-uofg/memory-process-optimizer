@@ -8,6 +8,7 @@
 
 // --- CONFIGURATION DEFAULTS ---
 #define MAX_TRACKED_APPS 7
+#define CONFIG_FILENAME "macnap.conf"
 // These are now variables, not constants, so we can change them at runtime!
 int config_timeout = 10;      // seconds
 int config_min_memory = 50;   // MB
@@ -159,35 +160,75 @@ void handle_exit(int sig) {
     exit(0);
 }
 
-// --- MAIN LOOP ---
-int main() {
-    // 1. Register the Safety Trap
-    signal(SIGINT, handle_exit);
+void save_config() {
+    FILE *f = fopen(CONFIG_FILENAME, "w"); // "w" = write mode
+    if (f == NULL) {
+        printf("[ERROR] Could not save configuration file.\n");
+        return;
+    }
+    // we save 2 numbers separated by a space
+    fprintf(f, "%d %d", config_timeout, config_min_memory);
+    fclose(f);
+    printf("[DATA] Settings saved to '%s'\n", CONFIG_FILENAME);
+}
 
-    // 2. Interactive Menu
-    printf("\n");
-    printf("========================================\n");
-    printf("   MacNap - CONFIGURATION MENU\n");
-    printf("========================================\n");
-    
-    int input_val;
-
-    // Ask for Timeout
-    printf("[1] Enter Freeze Timeout (Seconds) [Default: 10]: ");
-    if (scanf("%d", &input_val) == 1 && input_val > 0) {
-        config_timeout = input_val;
-    } else {
-        printf("    -> Using Default: 10s\n");
-        clear_input_buffer(); // Clear invalid input
+bool load_config() {
+    FILE *f = fopen(CONFIG_FILENAME, "r"); // "r" = read mode
+    if (f == NULL) {
+        return false; // File does not exist yet
     }
 
-    // Ask for RAM Threshold
-    printf("[2] Enter Minimum RAM to Freeze (MB) [Default: 50]: ");
-    if (scanf("%d", &input_val) == 1 && input_val > 0) {
-        config_min_memory = input_val;
-    } else {
-        printf("    -> Using Default: 50MB\n");
-        clear_input_buffer();
+    // read 2 integers
+    if (fscanf(f, "%d %d", &config_timeout, &config_min_memory) == 2) {
+        fclose(f);
+        return true; // Successfully loaded
+    }
+
+    fclose(f);
+    return false; // file existed but was empty or broken
+}
+
+// --- MAIN LOOP ---
+int main() {
+    signal(SIGINT, handle_exit);
+
+    printf("\n");
+    printf("========================================\n");
+    printf("   MacNap - AUTO CONFIGURATION\n");
+    printf("========================================\n");
+
+    // 1. Try to Load Settings
+    if (load_config()) {
+        // SUCCESS: Loaded from file
+        printf("   > Mode: AUTOMATIC (Loaded from 'macnap.conf')\n");
+    } 
+    else {
+        // FAIL: First run setup
+        printf("   > Mode: FIRST RUN SETUP\n");
+        printf("----------------------------------------\n");
+        
+        int input_val;
+
+        // Ask for Timeout
+        printf("[1] Enter Freeze Timeout (Seconds) [Default: 10]: ");
+        if (scanf("%d", &input_val) == 1 && input_val > 0) {
+            config_timeout = input_val;
+        } else {
+            printf("    -> Using Default: 10s\n");
+            clear_input_buffer(); 
+        }
+
+        // Ask for RAM Threshold
+        printf("[2] Enter Minimum RAM to Freeze (MB) [Default: 50]: ");
+        if (scanf("%d", &input_val) == 1 && input_val > 0) {
+            config_min_memory = input_val;
+        } else {
+            printf("    -> Using Default: 50MB\n");
+            clear_input_buffer();
+        }
+
+        // SAVE the settings so we don't ask next time
+        save_config();
     }
 
     // Summary
@@ -199,7 +240,7 @@ int main() {
     printf("----------------------------------------\n");
     printf("   (Press Ctrl+C to Stop Safely)\n\n");
 
-    // 3. Start the Loop
+    // 2. Start the Loop
     while (1) {
         int32_t current_pid = os_get_active_pid();
 
