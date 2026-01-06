@@ -10,6 +10,12 @@
 #define MAX_TRACKED_APPS 7
 #define CONFIG_FILENAME "macnap.conf"
 
+// Whitelist Settings
+#define WHITELIST_FILENAME "whitelist.txt"
+#define MAX_WHITELIST_ITEMS 20
+char user_whitelist[MAX_WHITELIST_ITEMS][MAX_PROC_NAME]; // 2D array of strings
+int user_whitelist_count = 0;
+
 // --- ANSI COLORS ---
 #define COLOR_RESET   "\033[0m"
 #define COLOR_RED     "\033[31m"    // Freezing / Interface
@@ -77,18 +83,69 @@ bool load_config() {
     return false; 
 }
 
+// --- WHITELIST LOADER ---
+void load_whitelist() {
+    FILE *f = fopen(WHITELIST_FILENAME, "r");
+    if (f == NULL) {
+        // Create a deafult file so the user knows about it
+        f = fopen(WHITELIST_FILENAME, "w");
+        if (f) {
+            fprintf(f, "Spotify\nDiscord\nActivity Monitor\n");
+            fclose(f);
+            printf(COLOR_CYAN "[DATA] Created deafult '%s'" COLOR_RESET "\n", WHITELIST_FILENAME);
+        }
+        return;
+    }
+
+    user_whitelist_count = 0;
+    char line[MAX_PROC_NAME];
+
+    while (fgets(line, sizeof(line), f)) {
+        // clean up the line (remove newline and spaces)
+        line[strcspn(line, "\r\n")] = 0; // Remove newline
+
+        // skip empty lines or comments
+        if (strlen(line) < 2 || line[0] == '#') continue;
+
+        if (user_whitelist_count < MAX_WHITELIST_ITEMS) {
+            strcpy(user_whitelist[user_whitelist_count], line);
+            user_whitelist_count++;
+        }
+    }
+    fclose(f);
+    printf(COLOR_CYAN "[DATA] Loaded %d VIP apps from '%s'" COLOR_RESET "\n", user_whitelist_count, WHITELIST_FILENAME);
+}
+
 // --- CRITICAL SAFETY FILTER ---
+// --- DEBUG SAFETY FILTER ---
 bool is_critical_process(const char* name) {
+    // 1. HARDCODED SYSTEM SAFETY LIST
     const char* blacklist[] = {
         "Finder", "Dock", "Electron", "WindowServer", "loginwindow",
-        "kernel_task", "MacNap", "Terminal", "iTerm2", "Code", NULL
+        "kernel_task", "MacNap", "Terminal", "iTerm2", "Code", "clang", "make", NULL
     };
 
     for (int i = 0; blacklist[i] != NULL; i++) {
         if (strstr(name, blacklist[i]) != NULL) {
+            // DEBUG PRINT: Tell us why it's blocked
+            // printf(COLOR_YELLOW "[DEBUG] Ignoring '%s' (Matches Blacklist: '%s')\n" COLOR_RESET, name, blacklist[i]);
             return true;
         }
     }
+
+    // 2. USER WHITELIST (VIPs)
+    for (int i = 0; i < user_whitelist_count; i++) {
+        // Paranoid check for empty strings
+        if (strlen(user_whitelist[i]) < 1) continue;
+
+        if (strstr(name, user_whitelist[i]) != NULL) {
+            // !!! THIS IS THE IMPORTANT LINE !!!
+            printf(COLOR_YELLOW "[DEBUG] Ignoring '%s' (Matches Whitelist: '%s')\n" COLOR_RESET, 
+                   name, user_whitelist[i]);
+            return true;
+        }
+    }
+
     return false;
 }
 
@@ -157,7 +214,7 @@ void check_for_idlers() {
         // 2. The Gatekeeper
         if (mem_mb < config_min_memory) {
             // Uncomment below if you want to see debug logs for small apps
-            // printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
+            printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
             continue;
         }
 
@@ -247,6 +304,9 @@ int main() {
         // SAVE the settings
         save_config();
     }
+
+    // Load Whitelist
+    load_whitelist();
 
     // Summary
     printf("\n");
