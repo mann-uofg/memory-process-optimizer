@@ -149,6 +149,39 @@ bool is_critical_process(const char* name) {
     return false;
 }
 
+// NOTIFICATIONS
+void send_notification(const char* title, const char* message) {
+    char command[512];
+    // construct AppleScript command to show notification
+    snprintf(command, sizeof(command),
+             "osascript -e 'display notification \"%s\" with title \"%s\"'", message, title);
+    system(command);
+}
+
+// BUG FIXING FUNCTION
+void perform_speculative_thaw() {
+    bool thawed_something = false;
+    for (int i = 0; i < MAX_TRACKED_APPS; i++) {
+        if (history[i].valid && history[i].is_frozen) {
+            // Unfreeze everything so the user can enter
+            os_thaw_process(history[i].pid);
+            history[i].is_frozen = false;
+
+            // Reset timer
+            history[i].last_active_time = time(NULL);
+            thawed_something = true;
+
+            printf(COLOR_GREEN "[SENTINEL] UI Struggle Detected! Emergency Thaw: %s" COLOR_RESET "\n", 
+                   history[i].name);
+        }
+    }
+
+    // If we actually helped the user, tell them via notification
+    if (thawed_something) {
+        send_notification("MacNap Sentinel", "Unlock complete. Apps thawed for access.");
+    }
+}
+
 // --- CORE LOGIC ---
 
 void update_app_activity(int32_t pid) {
@@ -235,6 +268,11 @@ void check_for_idlers() {
                 
                 // CYAN for Score
                 printf(COLOR_CYAN "        (Score: %d freezes | +%.0f MB saved)" COLOR_RESET "\n", stats_frozen_count, mem_mb);
+
+                // Send Notification
+                char msg[128];
+                snprintf(msg, sizeof(msg), "Froze %s (+%.0f MB RAM)", history[i].name, mem_mb);
+                send_notification("MacNap Interface", msg);
             }
         }
     }
@@ -315,15 +353,31 @@ int main() {
     // New Colorized Summary
     printf("   > Target: " COLOR_RED "Apps idle > %d sec" COLOR_RESET "\n", config_timeout);
     printf("   > Filter: " COLOR_YELLOW "Apps > %d MB RAM" COLOR_RESET "\n", config_min_memory);
+    printf("   > System: " COLOR_GREEN "Sentinel & Notifications Active" COLOR_RESET "\n");
     printf("----------------------------------------\n" COLOR_RESET);
     printf(COLOR_CYAN "   (Press Ctrl+C to Stop Safely)" COLOR_RESET "\n\n");
 
     // 2. Start the Loop
     while (1) {
         int32_t current_pid = os_get_active_pid();
+        char current_name[MAX_PROC_NAME];
 
         if (current_pid > 0) {
-            update_app_activity(current_pid);
+            os_get_process_name(current_pid, current_name, MAX_PROC_NAME);
+
+            // --- SENTINEL CHECK (Bug Fix) ---
+            // If the user clicks a frozen app, macOS often reports "WindowManager" or "loginwindow".
+            if (strcmp(current_name, "WindowManager") == 0 || 
+                strcmp(current_name, "loginwindow") == 0 ||
+                strcmp(current_name, "Dock") == 0) {
+                
+                // User is stuck on the system layer -> THAW EVERYTHING
+                perform_speculative_thaw();
+            }
+            else {
+                // Normal operation
+                update_app_activity(current_pid);
+            }
         }
 
         check_for_idlers();
