@@ -16,6 +16,9 @@
 char user_whitelist[MAX_WHITELIST_ITEMS][MAX_PROC_NAME]; // 2D array of strings
 int user_whitelist_count = 0;
 
+// Runtime Flags
+bool flag_dry_run = false; // If true, we observe but do not freeze
+
 // --- ANSI COLORS ---
 #define COLOR_RESET   "\033[0m"
 #define COLOR_RED     "\033[31m"    // Freezing / Interface
@@ -255,6 +258,15 @@ void check_for_idlers() {
 
         // 3. The Timeout
         if (seconds_inactive > config_timeout) {
+            if (flag_dry_run) {
+                printf(COLOR_YELLOW "[DRY-RUN] Would have frozen %s (PID %d). Saving %.0f MB." COLOR_RESET "\n", 
+                       history[i].name, history[i].pid, mem_mb);
+                
+                // Reset timer so we don't spam the log every second
+                history[i].last_active_time = time(NULL);
+                continue; // Skip the actual freezing!
+            }
+
             // RED for Freezing
             printf(COLOR_RED "[Interface] %s (PID %d) inactive for %.0fs. Freezing!" COLOR_RESET "\n", 
                    history[i].name, history[i].pid, seconds_inactive);
@@ -303,20 +315,44 @@ void handle_exit(int sig) {
 }
 
 // --- MAIN LOOP ---
-int main() {
+int main(int argc, char* argv[]) {
     signal(SIGINT, handle_exit);
+
+    // 1. PARSE ARGUMENTS (Day 10)
+    bool force_setup = false;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("\nMacNap Usage:\n");
+            printf("  ./MacNap            Run normally (auto-load config)\n");
+            printf("  ./MacNap --setup    Force the configuration menu to run\n");
+            printf("  ./MacNap --dry-run  Simulate freezing (safe mode)\n");
+            printf("  ./MacNap --help     Show this message\n\n");
+            return 0;
+        }
+        else if (strcmp(argv[i], "--setup") == 0) {
+            force_setup = true;
+        }
+        else if (strcmp(argv[i], "--dry-run") == 0) {
+            flag_dry_run = true; // Requires the global bool at top of file
+            printf(COLOR_YELLOW "[FLAG] Dry Run Mode: ENABLED (No freezing will occur)" COLOR_RESET "\n");
+        }
+    }
 
     printf("\n");
     printf(COLOR_BOLD "========================================\n");
     printf("   MacNap - AUTO CONFIGURATION\n");
     printf("========================================\n" COLOR_RESET);
 
-    // 1. Try to Load Settings
-    if (load_config()) {
+    // 2. CONFIGURATION LOGIC
+    // Logic: Only load from file if user DID NOT ask for --setup
+    if (!force_setup && load_config()) {
         printf("   > Mode: AUTOMATIC (Loaded from 'macnap.conf')\n");
     } 
     else {
-        printf("   > Mode: FIRST RUN SETUP\n");
+        if (force_setup) printf("   > Mode: FORCED SETUP (--setup detected)\n");
+        else             printf("   > Mode: FIRST RUN SETUP\n");
+
         printf("----------------------------------------\n");
         
         int input_val;
@@ -350,14 +386,19 @@ int main() {
     printf("\n");
     printf(COLOR_BOLD "----------------------------------------\n");
     printf("   🚀 STARTING ENGINE...\n");
-    // New Colorized Summary
     printf("   > Target: " COLOR_RED "Apps idle > %d sec" COLOR_RESET "\n", config_timeout);
     printf("   > Filter: " COLOR_YELLOW "Apps > %d MB RAM" COLOR_RESET "\n", config_min_memory);
-    printf("   > System: " COLOR_GREEN "Sentinel & Notifications Active" COLOR_RESET "\n");
+    
+    if (flag_dry_run) {
+        printf("   > Mode:   " COLOR_YELLOW "DRY RUN (Simulation Only)" COLOR_RESET "\n");
+    } else {
+        printf("   > System: " COLOR_GREEN "Sentinel & Notifications Active" COLOR_RESET "\n");
+    }
+    
     printf("----------------------------------------\n" COLOR_RESET);
     printf(COLOR_CYAN "   (Press Ctrl+C to Stop Safely)" COLOR_RESET "\n\n");
 
-    // 2. Start the Loop
+    // 3. Start the Loop
     while (1) {
         int32_t current_pid = os_get_active_pid();
         char current_name[MAX_PROC_NAME];
@@ -365,17 +406,14 @@ int main() {
         if (current_pid > 0) {
             os_get_process_name(current_pid, current_name, MAX_PROC_NAME);
 
-            // --- SENTINEL CHECK (Bug Fix) ---
-            // If the user clicks a frozen app, macOS often reports "WindowManager" or "loginwindow".
+            // --- SENTINEL CHECK ---
             if (strcmp(current_name, "WindowManager") == 0 || 
                 strcmp(current_name, "loginwindow") == 0 ||
                 strcmp(current_name, "Dock") == 0) {
                 
-                // User is stuck on the system layer -> THAW EVERYTHING
                 perform_speculative_thaw();
             }
             else {
-                // Normal operation
                 update_app_activity(current_pid);
             }
         }
