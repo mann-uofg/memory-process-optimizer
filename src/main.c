@@ -10,6 +10,9 @@
 #define MAX_TRACKED_APPS 7
 #define CONFIG_FILENAME "macnap.conf"
 
+// --- LOG FILE ---
+#define LOG_FILENAME "macnap.log"
+
 // Whitelist Settings
 #define WHITELIST_FILENAME "whitelist.txt"
 #define MAX_WHITELIST_ITEMS 20
@@ -152,6 +155,22 @@ bool is_critical_process(const char* name) {
     return false;
 }
 
+// LOGGING SYSTEM
+void write_log(const char* level, const char* message) {
+    FILE *f = fopen(LOG_FILENAME, "a"); // 'a' = append mode
+    if (f == NULL) return;
+
+    // Current time logging
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", t);
+
+    // write format: [TIME] [LEVEL] MESSAGE
+    fprintf(f, "[%s] [%s] %s\n", time_str, level, message);
+    fclose(f);
+}
+
 // NOTIFICATIONS
 void send_notification(const char* title, const char* message) {
     char command[512];
@@ -176,6 +195,11 @@ void perform_speculative_thaw() {
 
             printf(COLOR_GREEN "[SENTINEL] UI Struggle Detected! Emergency Thaw: %s" COLOR_RESET "\n", 
                    history[i].name);
+
+            // --- DAY 11: BLACK BOX LOGGING ---
+            char log_msg[128];
+            snprintf(log_msg, sizeof(log_msg), "Sentinel Emergency Thaw: %s", history[i].name);
+            write_log("SENTINEL", log_msg);
         }
     }
 
@@ -206,6 +230,10 @@ void update_app_activity(int32_t pid) {
                 printf(COLOR_GREEN "[ACTION] Welcome back, %s (PID %d). Thawing..." COLOR_RESET "\n", history[i].name, pid);
                 os_thaw_process(pid);
                 history[i].is_frozen = false;
+
+                char log_msg[128];
+                snprintf(log_msg, sizeof(log_msg), "Thawed %s (User Active)", history[i].name);
+                write_log("THAW", log_msg);
             }
             return;
         }
@@ -250,7 +278,7 @@ void check_for_idlers() {
         // 2. The Gatekeeper
         if (mem_mb < config_min_memory) {
             // Uncomment below if you want to see debug logs for small apps
-            printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
+            // printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
             continue;
         }
 
@@ -285,6 +313,9 @@ void check_for_idlers() {
                 char msg[128];
                 snprintf(msg, sizeof(msg), "Froze %s (+%.0f MB RAM)", history[i].name, mem_mb);
                 send_notification("MacNap Interface", msg);
+
+                // --- DAY 11: BLACK BOX LOGGING ---
+                write_log("FREEZE", msg);
             }
         }
     }
