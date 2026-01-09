@@ -315,90 +315,70 @@ void handle_exit(int sig) {
 }
 
 // --- MAIN LOOP ---
+// --- MAIN LOOP ---
 int main(int argc, char* argv[]) {
     signal(SIGINT, handle_exit);
 
-    // 1. PARSE ARGUMENTS (Day 10)
+    // 1. PARSE ARGUMENTS
     bool force_setup = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             printf("\nMacNap Usage:\n");
-            printf("  ./MacNap            Run normally (auto-load config)\n");
-            printf("  ./MacNap --setup    Force the configuration menu to run\n");
-            printf("  ./MacNap --dry-run  Simulate freezing (safe mode)\n");
+            printf("  ./MacNap            Run normally\n");
+            printf("  ./MacNap --setup    Force configuration menu\n");
+            printf("  ./MacNap --dry-run  Safe mode (No freezing)\n");
             printf("  ./MacNap --help     Show this message\n\n");
             return 0;
         }
-        else if (strcmp(argv[i], "--setup") == 0) {
-            force_setup = true;
-        }
+        else if (strcmp(argv[i], "--setup") == 0) force_setup = true;
         else if (strcmp(argv[i], "--dry-run") == 0) {
-            flag_dry_run = true; // Requires the global bool at top of file
-            printf(COLOR_YELLOW "[FLAG] Dry Run Mode: ENABLED (No freezing will occur)" COLOR_RESET "\n");
+            flag_dry_run = true;
+            printf(COLOR_YELLOW "[FLAG] Dry Run Mode: ENABLED" COLOR_RESET "\n");
         }
     }
 
-    printf("\n");
-    printf(COLOR_BOLD "========================================\n");
+    printf("\n" COLOR_BOLD "========================================\n");
     printf("   MacNap - AUTO CONFIGURATION\n");
     printf("========================================\n" COLOR_RESET);
 
-    // 2. CONFIGURATION LOGIC
-    // Logic: Only load from file if user DID NOT ask for --setup
+    // 2. CONFIGURATION
     if (!force_setup && load_config()) {
         printf("   > Mode: AUTOMATIC (Loaded from 'macnap.conf')\n");
     } 
     else {
-        if (force_setup) printf("   > Mode: FORCED SETUP (--setup detected)\n");
+        if (force_setup) printf("   > Mode: FORCED SETUP\n");
         else             printf("   > Mode: FIRST RUN SETUP\n");
 
         printf("----------------------------------------\n");
-        
         int input_val;
 
-        // Ask for Timeout
         printf("[1] Enter Freeze Timeout (Seconds) [Default: 10]: ");
-        if (scanf("%d", &input_val) == 1 && input_val > 0) {
-            config_timeout = input_val;
-        } else {
-            printf("    -> Using Default: 10s\n");
-            clear_input_buffer(); 
-        }
+        if (scanf("%d", &input_val) == 1 && input_val > 0) config_timeout = input_val;
+        else clear_input_buffer(); 
 
-        // Ask for RAM Threshold
         printf("[2] Enter Minimum RAM to Freeze (MB) [Default: 50]: ");
-        if (scanf("%d", &input_val) == 1 && input_val > 0) {
-            config_min_memory = input_val;
-        } else {
-            printf("    -> Using Default: 50MB\n");
-            clear_input_buffer();
-        }
+        if (scanf("%d", &input_val) == 1 && input_val > 0) config_min_memory = input_val;
+        else clear_input_buffer();
 
-        // SAVE the settings
         save_config();
     }
 
-    // Load Whitelist
     load_whitelist();
 
-    // Summary
-    printf("\n");
-    printf(COLOR_BOLD "----------------------------------------\n");
+    printf("\n" COLOR_BOLD "----------------------------------------\n");
     printf("   🚀 STARTING ENGINE...\n");
     printf("   > Target: " COLOR_RED "Apps idle > %d sec" COLOR_RESET "\n", config_timeout);
     printf("   > Filter: " COLOR_YELLOW "Apps > %d MB RAM" COLOR_RESET "\n", config_min_memory);
-    
-    if (flag_dry_run) {
-        printf("   > Mode:   " COLOR_YELLOW "DRY RUN (Simulation Only)" COLOR_RESET "\n");
-    } else {
-        printf("   > System: " COLOR_GREEN "Sentinel & Notifications Active" COLOR_RESET "\n");
-    }
-    
+    if (flag_dry_run) printf("   > Mode:   " COLOR_YELLOW "DRY RUN (Simulation Only)" COLOR_RESET "\n");
+    else              printf("   > System: " COLOR_GREEN "Sentinel & Notifications Active" COLOR_RESET "\n");
     printf("----------------------------------------\n" COLOR_RESET);
     printf(COLOR_CYAN "   (Press Ctrl+C to Stop Safely)" COLOR_RESET "\n\n");
 
-    // 3. Start the Loop
+    // 3. START THE LOOP
+    // Tracking for the 'Permission Bug'
+    int blind_counter = 0; 
+
     while (1) {
         int32_t current_pid = os_get_active_pid();
         char current_name[MAX_PROC_NAME];
@@ -406,15 +386,35 @@ int main(int argc, char* argv[]) {
         if (current_pid > 0) {
             os_get_process_name(current_pid, current_name, MAX_PROC_NAME);
 
-            // --- SENTINEL CHECK ---
-            if (strcmp(current_name, "WindowManager") == 0 || 
-                strcmp(current_name, "loginwindow") == 0 ||
-                strcmp(current_name, "Dock") == 0) {
+            // --- BUG FIX: PERMISSION DETECTOR ---
+            // If the OS keeps telling us "WindowManager", it means we are BLIND.
+            if (strcmp(current_name, "WindowManager") == 0) {
+                blind_counter++;
                 
+                // If we see this 5 times in a row, ALERT THE USER.
+                if (blind_counter > 4) {
+                    printf(COLOR_RED "\n[CRITICAL ERROR] MACNAP IS BLIND!" COLOR_RESET "\n");
+                    printf(COLOR_YELLOW "  macOS is hiding app names (returning 'WindowManager').\n");
+                    printf("  This means Screen Recording permissions are broken.\n");
+                    printf("  Run this command to fix it:\n" COLOR_RESET);
+                    printf(COLOR_BOLD "  tccutil reset ScreenCapture com.apple.Terminal\n\n" COLOR_RESET);
+                    
+                    blind_counter = 0; // Reset so we don't spam too fast
+                    sleep_ms(2000);    // Pause so user sees the message
+                }
+                
+                // Still run sentinel just in case
                 perform_speculative_thaw();
             }
+            else if (strcmp(current_name, "loginwindow") == 0 || strcmp(current_name, "Dock") == 0) {
+                // Normal Sentinel behavior for system UI
+                perform_speculative_thaw();
+                blind_counter = 0; // Reset counter, these are valid names
+            }
             else {
+                // Normal Operation: We see a real app!
                 update_app_activity(current_pid);
+                blind_counter = 0; // Reset counter, we are healthy
             }
         }
 
