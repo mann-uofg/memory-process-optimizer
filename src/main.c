@@ -345,13 +345,52 @@ void handle_exit(int sig) {
     exit(0);
 }
 
-// --- MAIN LOOP ---
+// --- Daemonizer ---
+void daemonize() {
+    #ifdef _WIN32
+        printf("Daemon mode not yet supported on Windows.\n");
+        exit(1);
+    #else
+        // 1. Fork off the parent process
+        pid_t pid = fork();
+
+        // An error occurred
+        if (pid < 0) exit(EXIT_FAILURE);
+
+        // Success: Let the parent terminate
+        // The terminal thinks the command is done.
+        if (pid > 0) exit(EXIT_SUCCESS);
+
+        // 2. On success: The child process becomes the session leader
+        if (setsid() < 0) exit(EXIT_FAILURE);
+
+        // 3. Catch, Ignore and Handle Signals
+        signal(SIGCHLD, SIG_IGN);
+        signal(SIGHUP, SIG_IGN);
+
+        // 4. Fork off for the second time (safety best practice)
+        pid = fork();
+        if (pid < 0) exit(EXIT_FAILURE);
+        if (pid > 0) exit(EXIT_SUCCESS);
+
+        // 5. Close all standard file decriptors
+        // we cannot print to the terminal anymore
+        // output sent to printf will disappear into the void.
+        freopen("/dev/null", "r", stdin);
+        freopen("/dev/null", "w", stdout);
+        freopen("/dev/null", "w", stderr);
+
+        // from now on, only write_log() and send_notification() will work.
+    #endif
+}
+
 // --- MAIN LOOP ---
 int main(int argc, char* argv[]) {
     signal(SIGINT, handle_exit);
 
     // 1. PARSE ARGUMENTS
     bool force_setup = false;
+    bool run_as_daemon = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
@@ -360,7 +399,11 @@ int main(int argc, char* argv[]) {
             printf("  ./MacNap --setup    Force configuration menu\n");
             printf("  ./MacNap --dry-run  Safe mode (No freezing)\n");
             printf("  ./MacNap --help     Show this message\n\n");
+            printf("  ./MacNap --daemon   Run in background (no terminal output)\n\n");
             return 0;
+        }
+        else if (strcmp(argv[i], "--daemon") == 0) {
+            run_as_daemon = true;
         }
         else if (strcmp(argv[i], "--setup") == 0) force_setup = true;
         else if (strcmp(argv[i], "--dry-run") == 0) {
@@ -409,6 +452,13 @@ int main(int argc, char* argv[]) {
     // 3. START THE LOOP
     // Tracking for the 'Permission Bug'
     int blind_counter = 0; 
+
+    if (run_as_daemon) {
+        printf("MacNap is going ghost! See 'macnap.log' for activity.\n\n");
+        write_log("SYSTEM", "Daemon Mode Activated (Detached from Terminal)");
+        daemonize();
+        // After daemonizing, we cannot print to terminal anymore
+    }
 
     while (1) {
         int32_t current_pid = os_get_active_pid();
