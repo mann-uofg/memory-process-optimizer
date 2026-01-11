@@ -13,6 +13,9 @@
 // --- LOG FILE ---
 #define LOG_FILENAME "macnap.log"
 
+// --- PID FILE ---
+#define PID_FILENAME "macnap.pid"
+
 // Whitelist Settings
 #define WHITELIST_FILENAME "whitelist.txt"
 #define MAX_WHITELIST_ITEMS 20
@@ -62,6 +65,37 @@ AppState history[MAX_TRACKED_APPS];
 void clear_input_buffer() {
     int c;
     while ((c = getchar()) != '\n' && c != EOF);
+}
+
+// --- PID Manager ---
+void create_pid_file() {
+    FILE *f = fopen(PID_FILENAME, "w");
+    if (f) {
+        fprintf(f, "%d", getpid());
+        fclose(f);
+    }
+}
+
+void remove_pid_file() {
+    remove(PID_FILENAME);
+}
+
+int get_running_pid() {
+    FILE *f = fopen(PID_FILENAME, "r");
+    if (!f) return 0; // File doesn't exist
+
+    int pid = 0;
+    if (fscanf(f, "%d", &pid) != 1) pid = 0;
+    fclose(f);
+    return pid;
+}
+
+// Check if a process is actually alive in the OS
+bool is_process_running(int pid) {
+    if (pid <= 0) return false;
+    // Signal 0 is a special null signal.
+    // it doesn't kill the process, but returns 0 if the process exists.
+    return (kill(pid, 0) == 0);
 }
 
 // --- FILE I/O HELPERS ---
@@ -342,6 +376,10 @@ void handle_exit(int sig) {
     }
 
     printf("[DONE] All Processes Restored. Exiting safely. Bye!\n\n");
+
+    write_log("SYSTEM", "ENGINE STOPPED.");
+    remove_pid_file();
+
     exit(0);
 }
 
@@ -358,7 +396,6 @@ void daemonize() {
         if (pid < 0) exit(EXIT_FAILURE);
 
         // Success: Let the parent terminate
-        // The terminal thinks the command is done.
         if (pid > 0) exit(EXIT_SUCCESS);
 
         // 2. On success: The child process becomes the session leader
@@ -368,19 +405,21 @@ void daemonize() {
         signal(SIGCHLD, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
 
-        // 4. Fork off for the second time (safety best practice)
+        // 4. Fork off for the second time (Safety best practice)
         pid = fork();
         if (pid < 0) exit(EXIT_FAILURE);
         if (pid > 0) exit(EXIT_SUCCESS);
 
-        // 5. Close all standard file decriptors
-        // we cannot print to the terminal anymore
-        // output sent to printf will disappear into the void.
+        // 5. Write the NEW child PID to the file so we can stop it later
+        create_pid_file(); 
+
+        // 6. Close all standard file descriptors
+        // We cannot print to the terminal anymore!
         freopen("/dev/null", "r", stdin);
         freopen("/dev/null", "w", stdout);
         freopen("/dev/null", "w", stderr);
 
-        // from now on, only write_log() and send_notification() will work.
+        // From now on, only write_log() and send_notification() will work.
     #endif
 }
 
@@ -398,8 +437,21 @@ int main(int argc, char* argv[]) {
             printf("  ./MacNap            Run normally\n");
             printf("  ./MacNap --setup    Force configuration menu\n");
             printf("  ./MacNap --dry-run  Safe mode (No freezing)\n");
-            printf("  ./MacNap --help     Show this message\n\n");
-            printf("  ./MacNap --daemon   Run in background (no terminal output)\n\n");
+            printf("  ./MacNap --help     Show this message\n");
+            printf("  ./MacNap --daemon   Run in background (no terminal output)\n");
+            printf("  ./MacNap --stop     Kill the background daemon.\n\n");
+            return 0;
+        }
+        else if (strcmp(argv[i], "--stop") == 0) {
+            int pid = get_running_pid();
+            if (pid > 0 && is_process_running(pid)) {
+                printf("Stopping MacNap Daemon (PID %d)...\n", pid);
+                kill(pid, SIGINT);
+                // wait a tiny bit for cleanup
+                sleep_ms(500);
+            } else {
+                printf("MacNap is not running (or PID file missing.)\n");
+            }
             return 0;
         }
         else if (strcmp(argv[i], "--daemon") == 0) {
@@ -410,6 +462,20 @@ int main(int argc, char* argv[]) {
             flag_dry_run = true;
             printf(COLOR_YELLOW "[FLAG] Dry Run Mode: ENABLED" COLOR_RESET "\n");
         }
+    }
+
+    // before starting, check if already running
+    int existing_pid = get_running_pid();
+    if (existing_pid > 0 && is_process_running(existing_pid)) {
+        printf(COLOR_RED "[ERROR] MacNap is already running (PID %d)!" COLOR_RESET "\n", existing_pid);
+        printf("Use './MacNap --stop' first.\n");
+        return 1;
+    }
+
+    // If we are not a daemon, write the PID now.
+    // If we are a daemon, it will be written after daemonizing.
+    if (!run_as_daemon) {
+        create_pid_file();
     }
 
     printf("\n" COLOR_BOLD "========================================\n");
