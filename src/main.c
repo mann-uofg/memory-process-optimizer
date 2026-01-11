@@ -383,6 +383,21 @@ void handle_exit(int sig) {
     exit(0);
 }
 
+// HOT RELOAD
+void handle_reload(int sig) {
+    printf(COLOR_CYAN "\n[SIGNAL] Received SIGHUP. Reloading configuration..." COLOR_RESET "\n");
+    write_log("SYSTEM", "Reloading Configuration (Hot Swap)");
+
+    // Reload config
+    load_config();
+    // Reload whitelist
+    load_whitelist();
+
+    // we cant easily change the timeout logic mid-loop,
+    // but the variables config_timeout and config_min_memory
+    // update instantly for the NEXT check.
+}
+
 // --- Daemonizer ---
 void daemonize() {
     #ifdef _WIN32
@@ -425,7 +440,6 @@ void daemonize() {
 
 // --- MAIN LOOP ---
 int main(int argc, char* argv[]) {
-    signal(SIGINT, handle_exit);
 
     // 1. PARSE ARGUMENTS
     bool force_setup = false;
@@ -435,11 +449,22 @@ int main(int argc, char* argv[]) {
         if (strcmp(argv[i], "--help") == 0) {
             printf("\nMacNap Usage:\n");
             printf("  ./MacNap            Run normally\n");
+            printf("  ./MacNap --help     Show this message\n");
             printf("  ./MacNap --setup    Force configuration menu\n");
             printf("  ./MacNap --dry-run  Safe mode (No freezing)\n");
-            printf("  ./MacNap --help     Show this message\n");
             printf("  ./MacNap --daemon   Run in background (no terminal output)\n");
+            printf("  ./MacNap --reload   Reload configuration and whitelist\n");
             printf("  ./MacNap --stop     Kill the background daemon.\n\n");
+            return 0;
+        }
+        else if (strcmp(argv[i], "--reload") == 0) {
+            int pid = get_running_pid();
+            if (pid > 0 && is_process_running(pid)) {
+                printf("Reloading MacNap Daemon (PID %d)...\n", pid);
+                kill(pid, SIGHUP);
+            } else {
+                printf("MacNap is not running.\n");
+            }
             return 0;
         }
         else if (strcmp(argv[i], "--stop") == 0) {
@@ -525,6 +550,10 @@ int main(int argc, char* argv[]) {
         daemonize();
         // After daemonizing, we cannot print to terminal anymore
     }
+
+    // we do this after daemonize() so the ignore setting gets overwritten.
+    signal(SIGINT, handle_exit);
+    signal(SIGHUP, handle_reload);
 
     while (1) {
         int32_t current_pid = os_get_active_pid();
