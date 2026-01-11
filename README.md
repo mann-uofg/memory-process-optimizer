@@ -1,89 +1,110 @@
-# Memory & Process Optimizer
+# MacNap: CPU/Memory Process Optimizer
 
-**A Cross-Platform Background Process Manager.**
+> **A High-Performance Background Process Manager for macOS (Windows Port In-Progress).**
 
-This tool automatically detects which application you are currently using and "freezes" (pauses) other heavy applications running in the background. This saves RAM and Battery by stopping apps from using the CPU when you are not looking at them.
-
----
-
-## Simple Explanation (What does it do?)
-Imagine your computer is like a desk. If you have too many toys (apps) on the desk, you run out of space (Memory).
-
-Usually, even if you aren't playing with a toy, it still takes up space and makes noise. This program watches you. When you stop playing with a toy for 10 seconds, this program magically "freezes" it so it stops moving and making noise. As soon as you look at it again, it instantly unfreezes so you can play.
-
-**Result:** Your computer stays fast and cool, even with many apps open.
+MacNap automatically detects which application you are currently using and "freezes" (pauses) other heavy applications running in the background. It effectively turns your computer into a **"Single-Tasking" machine**, maximizing CPU and RAM resources for the task at hand.
 
 ---
 
-## Technical Details
-This is a C11 Systems Engineering project that interacts directly with the Operating System Kernel.
+## 💡 The Concept
+Imagine your computer is a desk. If you have too many toys (apps) on the desk, you run out of space (RAM).
 
-### How it works
-1.  **Monitoring:** The program constantly queries the Window Server to find the Process ID (PID) of your active window.
-2.  **Tracking:** It maintains a history of recently used apps.
-3.  **Freezing (The Core Logic):**
-    * **macOS:** Uses `SIGSTOP` signals to remove the process from the CPU scheduler.
-    * **Windows:** Uses the Toolhelp32 API to take a snapshot of threads and suspends them individually.
-4.  **Thawing:** When you switch back to a frozen app, it detects the focus change and sends `SIGCONT` (Mac) or resumes threads (Windows) instantly.
+Usually, even if you aren't playing with a toy, it still takes up space and makes noise. **MacNap watches you.** When you stop looking at an app for **10 seconds** (configurable), MacNap interacts with the kernel to "freeze" it. It stops moving, stops using CPU, and stops draining battery. As soon as you look at it again, it instantly unfreezes.
 
-### Current Status
-* **macOS:** **Fully Functional.** Can detect windows via CoreGraphics, freeze/thaw via Signals, and includes a safety list to prevent crashing system apps (like Finder/Dock).
-* **Windows:** **Experimental.** The logic for freezing threads is implemented but requires further testing for stability.
+**Result:** Your computer stays fast, cool, and quiet, even with 50 apps open.
 
 ---
 
-## 📂 Project Structure
-The project is built using **CMake** to handle cross-platform compilation automatically.
+## 🚀 Key Features
 
-```text
-memory_management/
-├── CMakeLists.txt          # Build script (Detects OS automatically)
-├── src/
-│   ├── main.c              # Main Logic: Timers, Whitelists, and Decisions
-│   ├── os_interface.h      # The API Contract (Header file)
-│   └── platform/
-│       ├── mac_impl.c      # macOS Implementation (CoreGraphics, Signals)
-│       └── win_impl.c      # Windows Implementation (Win32 API)
-```
+*   **🧠 RAM Gatekeeper:** Only freezes apps consuming significant memory (User configurable, e.g., >50MB).
+*   **🛡️ The Sentinel:** A safety mechanism that detects if the UI locks up. If you struggle to access a frozen app, the Sentinel instantly thaws everything.
+*   **👻 Ghost Mode (Daemon):** Can run entirely in the background using `fork()` and `setsid()`. No terminal window required.
+*   **🎟️ VIP Whitelist:** Supports a `whitelist.txt` file to prevent specific apps (like Spotify or Discord) from ever being frozen.
+*   **⚡ Hot Swapping:** change your settings or whitelist while the program is running and reload instantly without restarting.
+*   **📼 Flight Recorder:** Maintains a `macnap.log` file with timestamps of every freeze, thaw, and error.
+*   **🔔 Native Notifications:** Sends macOS desktop notifications when taking action.
 
 ---
 
-## How to Run
+## 🛠️ Technical Architecture
 
-### Prerequisites
+This is a **C11 Systems Engineering** project that interacts directly with the Operating System Kernel.
 
-* C Compiler (GCC/Clang for Mac, MSVC/MinGW for Windows)
-* CMake (Version 3.10 or higher)
+1.  **Monitoring:** Queries the Window Server (CoreGraphics/Quartz) via [`src/platform/mac_impl.c`](src/platform/mac_impl.c) to find the Process ID (PID) of the active window.
+2.  **Freezing:** Uses `SIGSTOP` signals to remove the process from the CPU scheduler.
+3.  **Daemonization:** Uses Unix process forking in [`src/main.c`](src/main.c) to detach from the terminal and run as a system service.
+4.  **IPC (Inter-Process Communication):** Uses `SIGHUP` signals to trigger configuration reloads and PID files to manage lifecycle.
 
-### Build & Run on macOS
+**Current Status:**
+*    **macOS:** **Production Ready.** Full feature set including Daemons, Notifications, and Safety Filters.
+*    **Windows:** **In Development.** Core logic exists in [`src/platform/win_impl.c`](src/platform/win_impl.c), but the OS interface layer is currently being ported.
 
-Open your terminal in the project folder and run:
+---
+
+## 🎮 Installation & Usage
+
+### 1. Build the Project
+Open your terminal in the project folder:
 
 ```bash
 mkdir build
 cd build
 cmake ..
 make
-./MacNap
 ```
 
-### Build & Run on Windows
+### 2. Command Line Interface (CLI)
+MacNap now supports advanced command-line flags.
 
-Open PowerShell in the project folder and run:
+| Command                        | Description                                                                 |
+|--------------------------------|-----------------------------------------------------------------------------|
+| `./MacNap`                     | Run in standard interactive mode                                           |
+| `../MacNap --daemon`          | Ghost Mode. Runs in the background and closes terminal                    |
+| `../MacNap --stop`            | Stops the background daemon safely                                         |
+| `../MacNap --reload`          | Forces the daemon to re-read macnap.conf and whitelist.txt                |
+| `../MacNap --dry-run`         | Simulation. Logs what would happen, but freezes nothing                   |
+| `../MacNap --setup`           | Forces the First-Run Configuration menu to appear                          |
 
-```powershell
-mkdir build
-cd build
-cmake ..
-cmake --build .
-.\Debug\MacNap.exe
+### ⚙️ Configuration
+**macnap.conf** Stores your threshold settings. You can edit this manually or use --setup.
+```
+Format: [TIMEOUT_SECONDS] [MIN_MEMORY_MB]
+Plaintext
+10 50
 ```
 
+**whitelist.txt** Add application names here (one per line) to protect them from freezing.
+```
+Plaintext
+Spotify
+Discord
+Activity Monitor
+Visual Studio Code
+```
+### 📂 Project Structure
+```
+memory_management/
+├── CMakeLists.txt              # Cross-platform build script
+├── macnap.conf                 # User Settings (Generated automatically)
+├── whitelist.txt               # User VIP List (Generated automatically)
+├── macnap.log                  # Activity Log
+├── macnap.pid                  # Daemon Lock File
+├── src/
+│   ├── main.c                  # Core Logic: Daemon, Sentinel, Argument Parsing
+│   ├── os_interface.h          # API Contract (Cross-platform header)
+│   └── platform/
+│       ├── mac_impl.c          # macOS Implementation (CoreGraphics, libproc)
+│       └── win_impl.c          # Windows Implementation (Win32 API)
+```
 ---
 
-## Roadmap (Future Features)
+## 🗺️ Roadmap (Upcoming)
 
-* [ ] **RAM Thresholds:** Only freeze applications that are using more than 500MB of Memory.
-* [ ] **User Configuration:** Allow users to set their own timeout (currently 10 seconds).
-* [ ] **Windows Stability:** Improve the thread suspension logic for Windows apps.
-* [ ] **Linux Support:** Add support for Linux using X11/Wayland detection.
+- [x] Memory Thresholds
+- [x] Whitelisting
+- [x] Background Daemon
+- [x] Hot Reloading
+- [ ] Windows Port: Finalize os_interface_win.c for full Windows 11 support.
+- [ ] GUI Menu Bar App: Create a small icon in the top bar to control MacNap without the terminal.
+- [ ] Energy Impact Mode: Only freeze apps when the laptop is on battery power.
