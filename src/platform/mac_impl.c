@@ -5,6 +5,9 @@
 #include <signal.h>             // For kill(), SIGSTOP, SIGCONT
 #include <libproc.h>            // For process info (name, memory)
 #include <ApplicationServices/ApplicationServices.h> // For Window detection
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/ps/IOPowerSources.h>
+#include <IOKit/ps/IOPSKeys.h>
 
 // --- 1. WINDOW DETECTION (CoreGraphics) ---
 int32_t os_get_active_pid(void) {
@@ -85,4 +88,42 @@ int os_thaw_process(int32_t pid) {
         return 0;
     }
     return -1;
+}
+
+bool os_is_on_ac_power() {
+    // 1. Get a blob of power source info from the kernel
+    CFTypeRef powerInfo = IOPSCopyPowerSourcesInfo();
+    if (!powerInfo) return true; // Assume AC if error
+
+    // 2. Get the list of power sources (Batteries, UPS, etc.)
+    CFArrayRef powerSourcesList = IOPSCopyPowerSourcesList(powerInfo);
+    if (!powerSourcesList) {
+        CFRelease(powerInfo);
+        return true;
+    }
+
+    bool is_ac = false;
+
+    // 3. Loop through sources (Usually just one battery)
+    for (CFIndex i = 0; i < CFArrayGetCount(powerSourcesList); i++) {
+        CFTypeRef source = CFArrayGetValueAtIndex(powerSourcesList, i);
+        CFDictionaryRef description = IOPSGetPowerSourceDescription(powerInfo, source);
+
+        if (description) {
+            // Check the "Power Source State" key
+            CFStringRef state = CFDictionaryGetValue(description, CFSTR(kIOPSPowerSourceStateKey));
+            
+            // kIOPSACPowerValue means "Plugged In"
+            if (CFStringCompare(state, CFSTR(kIOPSACPowerValue), 0) == kCFCompareEqualTo) {
+                is_ac = true;
+                break;
+            }
+        }
+    }
+
+    // 4. Cleanup memory (Important in C!)
+    CFRelease(powerSourcesList);
+    CFRelease(powerInfo);
+
+    return is_ac;
 }

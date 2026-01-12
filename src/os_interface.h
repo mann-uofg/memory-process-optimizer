@@ -4,6 +4,9 @@
 #include <stdint.h>  // For int32_t, uint64_t
 #include <stdbool.h> // For bool, true, false
 #include <stddef.h>  // For size_t
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/ps/IOPowerSources.h>
+#include <IOKit/ps/IOPSKeys.h>
 
 // Maximum length for a process name string
 #define MAX_PROC_NAME 256
@@ -57,5 +60,8 @@ int os_thaw_process(int32_t pid);
  * @return uint64_t Memory usage in Bytes.
  */
 uint64_t os_get_memory_usage(int32_t pid);
+
+// Returns true if plugged into wall (AC), false if on battery
+bool os_is_on_ac_power();
 
 #endif // OS_INTERFACE_H

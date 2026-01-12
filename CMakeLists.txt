@@ -17,18 +17,19 @@ set(SOURCE_FILES src/main.c)
 if(APPLE)
     message(STATUS "Build System: Detected macOS (XNU Kernel)")
     
-    # Add Mac-specific implementation
+    # --- FIX: Point to the correct file ---
     list(APPEND SOURCE_FILES src/platform/mac_impl.c)
     
-    # Find required Mac frameworks (for Window Management)
+    # Find Frameworks (Including IOKit for Day 15)
     find_library(APP_SERVICES ApplicationServices)
     find_library(CORE_FOUNDATION CoreFoundation)
+    find_library(IO_KIT IOKit)
     
     # Create the Executable
     add_executable(MacNap ${SOURCE_FILES})
     
     # Link Mac Frameworks
-    target_link_libraries(MacNap ${APP_SERVICES} ${CORE_FOUNDATION})
+    target_link_libraries(MacNap ${APP_SERVICES} ${CORE_FOUNDATION} ${IO_KIT})
 
 elseif(WIN32)
     message(STATUS "Build System: Detected Windows (NT Kernel)")
@@ -40,9 +41,6 @@ elseif(WIN32)
     add_executable(MacNap ${SOURCE_FILES})
     
     # Link Windows Libraries
-    # Kernel32: Standard OS calls
-    # User32: Window management (GetForegroundWindow)
-    # Psapi: Process Status API (Memory usage)
     target_link_libraries(MacNap kernel32 user32 psapi)
 
 else()

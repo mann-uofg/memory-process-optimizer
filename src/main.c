@@ -24,6 +24,7 @@ int user_whitelist_count = 0;
 
 // Runtime Flags
 bool flag_dry_run = false; // If true, we observe but do not freeze
+bool flag_energy_mode = false; // If true, only freeze when on battery
 
 // --- ANSI COLORS ---
 #define COLOR_RESET   "\033[0m"
@@ -297,6 +298,12 @@ void update_app_activity(int32_t pid) {
 }
 
 void check_for_idlers() {
+    if (flag_energy_mode) {
+        if (os_is_on_ac_power()) {
+            // we are plugged in, skip freezing
+            return;
+        }
+    }
     time_t now = time(NULL);
     int32_t active_pid = os_get_active_pid();
 
@@ -454,8 +461,13 @@ int main(int argc, char* argv[]) {
             printf("  ./MacNap --dry-run  Safe mode (No freezing)\n");
             printf("  ./MacNap --daemon   Run in background (no terminal output)\n");
             printf("  ./MacNap --reload   Reload configuration and whitelist\n");
+            printf("  ./MacNap --energy-mode  Enable Energy Mode (Freeze only on Battery)\n");
             printf("  ./MacNap --stop     Kill the background daemon.\n\n");
             return 0;
+        }
+        else if (strcmp(argv[i], "--energy-mode") == 0) {
+            flag_energy_mode = true;
+            printf(COLOR_GREEN "[FLAG] Energy Mode: ENABLED (Freezing only on Battery)" COLOR_RESET "\n");
         }
         else if (strcmp(argv[i], "--reload") == 0) {
             int pid = get_running_pid();
