@@ -6,6 +6,9 @@
 #include <signal.h>
 #include "os_interface.h"
 
+// --- STATS FILE ---
+#define STATS_FILENAME "macnap.stats"
+
 // --- CONFIGURATION DEFAULTS ---
 #define MAX_TRACKED_APPS 7
 #define CONFIG_FILENAME "macnap.conf"
@@ -61,6 +64,16 @@ typedef struct {
 } AppState;
 
 AppState history[MAX_TRACKED_APPS];
+
+// --- LIVE STATS SYSTEM ---
+void update_stats_file(time_t start_time) {
+    FILE *f = fopen(STATS_FILENAME, "w");
+    if (f) {
+        // Format: [START_TIME] [FROZEN_COUNT] [RAM_SAVED]
+        fprintf(f, "%ld %d %llu", start_time, stats_frozen_count, stats_ram_saved_mb);
+        fclose(f);
+    }
+}
 
 // --- HELPER: INPUT CLEANING ---
 void clear_input_buffer() {
@@ -445,9 +458,57 @@ void daemonize() {
     #endif
 }
 
+void print_status_report() {
+    int pid = get_running_pid();
+    bool running = (pid > 0 && is_process_running(pid));
+
+    printf("\n" COLOR_BOLD "========================================\n");
+    printf("   MacNap STATUS REPORT 📊\n");
+    printf("========================================\n" COLOR_RESET);
+
+    if (running) {
+        printf("   State:       " COLOR_GREEN "● RUNNING (Daemon Active)" COLOR_RESET "\n");
+        printf("   PID:         %d\n", pid);
+        
+        // Read the live stats
+        FILE *f = fopen(STATS_FILENAME, "r");
+        if (f) {
+            time_t start_time = 0;
+            int count = 0;
+            uint64_t ram = 0;
+            
+            if (fscanf(f, "%ld %d %llu", &start_time, &count, &ram) == 3) {
+                // Calculate Uptime
+                time_t now = time(NULL);
+                double uptime_sec = difftime(now, start_time);
+                int hours = (int)uptime_sec / 3600;
+                int minutes = ((int)uptime_sec % 3600) / 60;
+                
+                printf("   Uptime:      %dh %dm\n", hours, minutes);
+                printf("   Apps Frozen: %d\n", count);
+                printf("   RAM Saved:   " COLOR_CYAN "%llu MB" COLOR_RESET "\n", ram);
+            }
+            fclose(f);
+        } else {
+            printf("   Stats:       " COLOR_YELLOW "Waiting for update..." COLOR_RESET "\n");
+        }
+
+        // Show Current Config
+        printf("----------------------------------------\n");
+        printf("   Timeout:     %ds\n", config_timeout);
+        printf("   RAM Limit:   %d MB\n", config_min_memory);
+    } 
+    else {
+        printf("   State:       " COLOR_RED "● STOPPED" COLOR_RESET "\n");
+        printf("   To start:    ./MacNap --daemon\n");
+    }
+    printf("========================================\n\n");
+}
+
 // --- MAIN LOOP ---
 int main(int argc, char* argv[]) {
 
+    time_t session_start_time = time(NULL);
     // 1. PARSE ARGUMENTS
     bool force_setup = false;
     bool run_as_daemon = false;
@@ -461,8 +522,13 @@ int main(int argc, char* argv[]) {
             printf("  ./MacNap --dry-run  Safe mode (No freezing)\n");
             printf("  ./MacNap --daemon   Run in background (no terminal output)\n");
             printf("  ./MacNap --reload   Reload configuration and whitelist\n");
+            printf("  ./MacNap --status   Show current status report\n");
             printf("  ./MacNap --energy-mode  Enable Energy Mode (Freeze only on Battery)\n");
             printf("  ./MacNap --stop     Kill the background daemon.\n\n");
+            return 0;
+        }
+        else if (strcmp(argv[i], "--status") == 0) {
+            print_status_report();
             return 0;
         }
         else if (strcmp(argv[i], "--energy-mode") == 0) {
@@ -607,6 +673,7 @@ int main(int argc, char* argv[]) {
         }
 
         check_for_idlers();
+        update_stats_file(session_start_time);
         sleep_ms(1000); 
     }
     return 0;
