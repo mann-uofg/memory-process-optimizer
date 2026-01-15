@@ -5,6 +5,8 @@
 #include <ctype.h>
 #include <signal.h>
 #include "os_interface.h"
+#include <unistd.h>
+#include <limits.h>
 
 // --- STATS FILE ---
 #define STATS_FILENAME "macnap.stats"
@@ -505,6 +507,79 @@ void print_status_report() {
     printf("========================================\n\n");
 }
 
+void get_plist_path(char* buffer, size_t size) {
+    const char* home = getenv("HOME");
+    snprintf(buffer, size, "%s/Library/LaunchAgents/com.macnap.agent.plist", home);
+}
+
+void install_startup() {
+    char exe_path[PATH_MAX];
+    char plist_path[PATH_MAX];
+
+    // 1. Get where MacNap is currently sitting
+    if (getcwd(exe_path, sizeof(exe_path)) == NULL) return;
+
+    // we need the full path to the binary
+    // NOTE: Assumes you are running this from the folder containing the executable
+    strcat(exe_path, "/MacNap");
+
+    get_plist_path(plist_path, sizeof(plist_path));
+
+    printf("   > Target: %s\n", plist_path);
+    printf("   > Binary: %s\n", exe_path);
+
+    // 2. write the LaunchAgent XML file
+    FILE *f = fopen(plist_path, "w");
+    if (!f) {
+        printf(COLOR_RED "[ERROR] Could not write plist file!" COLOR_RESET "\n");
+        return;
+    }
+
+    fprintf(f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    fprintf(f, "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n");
+    fprintf(f, "<plist version=\"1.0\">\n");
+    fprintf(f, "<dict>\n");
+    fprintf(f, "    <key>Label</key>\n");
+    fprintf(f, "    <string>com.macnap.agent</string>\n");
+    fprintf(f, "    <key>ProgramArguments</key>\n");
+    fprintf(f, "    <array>\n");
+    fprintf(f, "        <string>%s</string>\n", exe_path);
+    fprintf(f, "        <string>--daemon</string>\n"); // Always run as ghost
+    fprintf(f, "    </array>\n");
+    fprintf(f, "    <key>RunAtLoad</key>\n");
+    fprintf(f, "    <true/>\n");
+    fprintf(f, "    <key>StandardOutPath</key>\n");
+    fprintf(f, "    <string>/tmp/macnap.out.log</string>\n");
+    fprintf(f, "    <key>StandardErrorPath</key>\n");
+    fprintf(f, "    <string>/tmp/macnap.err.log</string>\n");
+    fprintf(f, "</dict>\n");
+    fprintf(f, "</plist>\n");
+    fclose(f);
+
+    // 3. tell macOS to load it immediately
+    char command[512];
+    snprintf(command, sizeof(command), "launchctl load %s", plist_path);
+    system(command);
+
+    printf(COLOR_GREEN "[SUCCESS] MacNap will now start automatically at login!" COLOR_RESET "\n");
+    printf(COLOR_YELLOW "(Do not move the MacNap file, or startup will fail!)" COLOR_RESET "\n");
+}
+
+void remove_startup() {
+    char plist_path[PATH_MAX];
+    get_plist_path(plist_path, sizeof(plist_path));
+
+    // 1. unload from macOS
+    char command[512];
+    snprintf(command, sizeof(command), "launchctl unload %s", plist_path);
+    system(command);
+
+    // 2. delete the file
+    remove(plist_path);
+
+    printf(COLOR_CYAN "[INFO] Startup removed. MacNap is manual only." COLOR_RESET "\n");
+}
+
 // --- MAIN LOOP ---
 int main(int argc, char* argv[]) {
 
@@ -523,8 +598,18 @@ int main(int argc, char* argv[]) {
             printf("  ./MacNap --daemon   Run in background (no terminal output)\n");
             printf("  ./MacNap --reload   Reload configuration and whitelist\n");
             printf("  ./MacNap --status   Show current status report\n");
+            printf("  ./MacNap --install-startup   Setup MacNap to start at login\n");
+            printf("  ./MacNap --remove-startup    Remove MacNap from login items\n");
             printf("  ./MacNap --energy-mode  Enable Energy Mode (Freeze only on Battery)\n");
             printf("  ./MacNap --stop     Kill the background daemon.\n\n");
+            return 0;
+        }
+        else if (strcmp(argv[i], "--install-startup") == 0) {
+            install_startup();
+            return 0;
+        }
+        else if (strcmp(argv[i], "--remove-startup") == 0) {
+            remove_startup();
             return 0;
         }
         else if (strcmp(argv[i], "--status") == 0) {
