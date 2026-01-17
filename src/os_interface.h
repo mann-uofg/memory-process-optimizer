@@ -64,4 +64,6 @@ uint64_t os_get_memory_usage(int32_t pid);
 // Returns true if plugged into wall (AC), false if on battery
 bool os_is_on_ac_power();
 
+int os_get_memory_pressure();
+
 #endif // OS_INTERFACE_H

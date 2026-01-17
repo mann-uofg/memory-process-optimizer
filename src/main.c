@@ -331,8 +331,21 @@ void check_for_idlers() {
         uint64_t mem_bytes = os_get_memory_usage(history[i].pid);
         double mem_mb = (double)mem_bytes / (1024 * 1024);
 
+        // Elastic threshold
+        int pressure = os_get_memory_pressure();
+        int dynamic_threshold = config_min_memory; // default which is 50 MB
+
+        // only freeze huge apps (> 500 MB)
+        if (pressure < 50) {
+            dynamic_threshold = 500;
+        }
+        // if system is busy, keeping it moderate
+        else if (pressure < 80) {
+            dynamic_threshold = 200;
+        }
+
         // 2. The Gatekeeper
-        if (mem_mb < config_min_memory) {
+        if (mem_mb < dynamic_threshold) {
             // Uncomment below if you want to see debug logs for small apps
             // printf("[IGNORE] %s is too small (%.1f MB)\n", history[i].name, mem_mb);
             continue;
@@ -490,6 +503,10 @@ void print_status_report() {
                 printf("   Apps Frozen: %d\n", count);
                 printf("   RAM Saved:   " COLOR_CYAN "%llu MB" COLOR_RESET "\n", ram);
             }
+
+            // Show pressure
+            int pressure = os_get_memory_pressure();
+            printf("   Sys Pressure:" COLOR_YELLOW " %d%%" COLOR_RESET "\n", pressure);
             fclose(f);
         } else {
             printf("   Stats:       " COLOR_YELLOW "Waiting for update..." COLOR_RESET "\n");

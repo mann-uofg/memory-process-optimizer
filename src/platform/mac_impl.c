@@ -8,6 +8,8 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/ps/IOPowerSources.h>
 #include <IOKit/ps/IOPSKeys.h>
+#include <mach/mach.h>
+#include <mach/mach_host.h>
 
 // --- 1. WINDOW DETECTION (CoreGraphics) ---
 int32_t os_get_active_pid(void) {
@@ -126,4 +128,24 @@ bool os_is_on_ac_power() {
     CFRelease(powerInfo);
 
     return is_ac;
+}
+
+// --- MEMORY PRESSURE ---
+int os_get_memory_pressure() {
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    vm_statistics64_data_t vm_stat;
+    
+    // Ask the kernel for VM stats
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info_t)&vm_stat, &count) != KERN_SUCCESS) {
+        return 0; // Fail safe
+    }
+
+    // Calculate total pages
+    uint64_t total_pages = vm_stat.active_count + vm_stat.inactive_count + vm_stat.free_count + vm_stat.wire_count;
+    uint64_t active_pages = vm_stat.active_count + vm_stat.wire_count;
+
+    if (total_pages == 0) return 0;
+
+    // Return percentage used
+    return (int)((active_pages * 100) / total_pages);
 }
