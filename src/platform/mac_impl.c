@@ -10,6 +10,7 @@
 #include <IOKit/ps/IOPSKeys.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 
 // --- 1. WINDOW DETECTION (CoreGraphics) ---
 int32_t os_get_active_pid(void) {
@@ -148,4 +149,31 @@ int os_get_memory_pressure() {
 
     // Return percentage used
     return (int)((active_pages * 100) / total_pages);
+}
+
+// --- ASSERTION CHECK ---
+bool os_has_power_assertion(int32_t pid) {
+    CFDictionaryRef assertions = NULL;
+    
+    // 1. Get all active power assertions from the OS
+    if (IOPMCopyAssertionsByProcess(&assertions) != kIOReturnSuccess) {
+        return false; // Could not check, assume safe to freeze
+    }
+
+    bool has_assertion = false;
+    
+    // 2. The dictionary keys are PIDs (as Numbers)
+    long long pid_long = (long long)pid;
+    CFNumberRef pid_num = CFNumberCreate(kCFAllocatorDefault, kCFNumberLongLongType, &pid_long);
+
+    // 3. Check if our PID exists in the assertion list
+    if (CFDictionaryContainsKey(assertions, pid_num)) {
+        has_assertion = true;
+    }
+
+    // 4. Cleanup
+    CFRelease(pid_num);
+    CFRelease(assertions);
+
+    return has_assertion;
 }

@@ -351,6 +351,12 @@ void check_for_idlers() {
             continue;
         }
 
+        // if the app is playing audio, video or compiling, skip it
+        if (os_has_power_assertion(history[i].pid)) {
+            history[i].last_active_time = time(NULL);
+            continue;
+        }
+
         double seconds_inactive = difftime(now, history[i].last_active_time);
 
         // 3. The Timeout

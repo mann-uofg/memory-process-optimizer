@@ -66,4 +66,7 @@ bool os_is_on_ac_power();
 
 int os_get_memory_pressure();
 
+// returns true if the process is preventing sleep (audio/video/rendering)
+bool os_has_power_assertion(int32_t pid);
+
 #endif // OS_INTERFACE_H
