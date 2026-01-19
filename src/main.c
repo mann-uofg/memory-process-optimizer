@@ -63,6 +63,7 @@ typedef struct {
     time_t last_active_time;
     bool is_frozen;
     bool valid; 
+    bool is_throttled;
 } AppState;
 
 AppState history[MAX_TRACKED_APPS];
@@ -312,35 +313,63 @@ void update_app_activity(int32_t pid) {
     next_slot = (next_slot + 1) % MAX_TRACKED_APPS;
 }
 
+// --- CPU THROTTLE MANAGER ---
+void manage_throttled_apps() {
+    bool active_throttles = false;
+
+    // Check if anyone needs throttling first to avoid useless sleeps
+    for (int i = 0; i < MAX_TRACKED_APPS; i++) {
+        if (history[i].valid && history[i].is_throttled) active_throttles = true;
+    }
+
+    if (!active_throttles) return;
+
+    // PHASE 1: The Breath (100ms ON)
+    for (int i = 0; i < MAX_TRACKED_APPS; i++) {
+        if (history[i].valid && history[i].is_throttled) {
+            os_thaw_process(history[i].pid);
+        }
+    }
+    sleep_ms(100); 
+
+    // PHASE 2: The Hold (We don't sleep here, the main loop handles the rest)
+    for (int i = 0; i < MAX_TRACKED_APPS; i++) {
+        if (history[i].valid && history[i].is_throttled) {
+            os_freeze_process(history[i].pid);
+        }
+    }
+}
+
 void check_for_idlers() {
+    // --- DAY 15: POWER CHECK ---
     if (flag_energy_mode) {
         if (os_is_on_ac_power()) {
-            // we are plugged in, skip freezing
+            // We are plugged in, skip freezing
             return;
         }
     }
+
     time_t now = time(NULL);
     int32_t active_pid = os_get_active_pid();
 
     for (int i = 0; i < MAX_TRACKED_APPS; i++) {
         if (!history[i].valid) continue;
-        if (history[i].is_frozen) continue; 
         if (history[i].pid == active_pid) continue; 
+        
+        // Skip completely frozen apps unless they are throttled (we still manage throttled ones)
+        if (history[i].is_frozen && !history[i].is_throttled) continue; 
 
-        // 1. Check Memory Usage
+        // 1. Check Memory Usage & Elastic Thresholds
         uint64_t mem_bytes = os_get_memory_usage(history[i].pid);
         double mem_mb = (double)mem_bytes / (1024 * 1024);
 
-        // Elastic threshold
+        // Elastic threshold logic (Day 18)
         int pressure = os_get_memory_pressure();
-        int dynamic_threshold = config_min_memory; // default which is 50 MB
+        int dynamic_threshold = config_min_memory; // Default (e.g. 50MB)
 
-        // only freeze huge apps (> 500 MB)
         if (pressure < 50) {
             dynamic_threshold = 500;
-        }
-        // if system is busy, keeping it moderate
-        else if (pressure < 80) {
+        } else if (pressure < 80) {
             dynamic_threshold = 200;
         }
 
@@ -351,11 +380,39 @@ void check_for_idlers() {
             continue;
         }
 
-        // if the app is playing audio, video or compiling, skip it
-        if (os_has_power_assertion(history[i].pid)) {
-            history[i].last_active_time = time(NULL);
+        // --- THROTTLE DECISION ---
+        bool has_assertion = os_has_power_assertion(history[i].pid);
+        
+        if (has_assertion) {
+            // If it has an assertion (Download/Audio), we don't freeze fully.
+            // Instead, we put it in THROTTLE mode.
+            if (!history[i].is_throttled) {
+                 printf(COLOR_YELLOW "[THROTTLE] %s is busy (Assertion Detected). Limiting CPU to 10%%." COLOR_RESET "\n", history[i].name);
+                 history[i].is_throttled = true;
+                 
+                 // If it was already fully frozen, thaw it first so it can enter the cycle
+                 if (history[i].is_frozen) {
+                     os_thaw_process(history[i].pid);
+                     history[i].is_frozen = false;
+                     if (stats_frozen_count > 0) stats_frozen_count--; // Adjust stats
+                 }
+            }
+            // Skip the standard freeze logic
             continue;
+        } 
+        else {
+            // Assertion is gone (Download finished)
+            if (history[i].is_throttled) {
+                printf(COLOR_GREEN "[RELEASE] %s finished task. Resuming normal watch." COLOR_RESET "\n", history[i].name);
+                history[i].is_throttled = false;
+                os_thaw_process(history[i].pid); // Ensure it's fully awake
+                history[i].is_frozen = false;
+            }
         }
+        // ---------------------------------------
+
+        // If currently throttled, skip standard freezing checks
+        if (history[i].is_throttled) continue;
 
         double seconds_inactive = difftime(now, history[i].last_active_time);
 
@@ -781,8 +838,9 @@ int main(int argc, char* argv[]) {
         }
 
         check_for_idlers();
+        manage_throttled_apps();
         update_stats_file(session_start_time);
-        sleep_ms(1000); 
+        sleep_ms(900); 
     }
     return 0;
 }
