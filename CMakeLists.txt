@@ -43,6 +43,13 @@ elseif(WIN32)
     # Link Windows Libraries
     target_link_libraries(MacNap kernel32 user32 psapi)
 
+if (APPLE)
+    add_custom_command(TARGET MacNap POST_BUILD
+        COMMAND codesign --force --sign - "${CMAKE_BINARY_DIR}/MacNap"
+        COMMENT "Signing MacNap to keep macOS permissions happy..."
+    )
+endif()
+
 else()
     message(FATAL_ERROR "OS not supported. This project only runs on macOS and Windows.")
 endif()

@@ -78,19 +78,35 @@ uint64_t os_get_memory_usage(int32_t pid) {
 
 // --- 4. FREEZE & THAW (Signals) ---
 int os_freeze_process(int32_t pid) {
-    // Send SIGSTOP: Tells the scheduler to remove this process from the run queue
-    if (kill(pid, SIGSTOP) == 0) {
-        return 0;
+    // 1. Get the Process Group ID (PGID)
+    pid_t pgid = getpgid(pid);
+    
+    if (pgid < 0) {
+        // Fallback: If we can't find the group, just freeze the single PID
+        return kill(pid, SIGSTOP);
     }
-    return -1;
+
+    // Safety: Never freeze our own group (MacNap)!
+    // getpgid(0) returns the group of the calling process (us).
+    if (pgid == getpgid(0)) { 
+        printf("[SAFETY] Prevented freezing of MacNap's own group.\n");
+        return -1; 
+    }
+
+    // 2. Freeze the WHOLE Group (Parent + Children)
+    // killpg(pgid, signal) sends the signal to everyone in the family.
+    return killpg(pgid, SIGSTOP);
 }
 
 int os_thaw_process(int32_t pid) {
-    // Send SIGCONT: Tells the scheduler to resume the process
-    if (kill(pid, SIGCONT) == 0) {
-        return 0;
+    pid_t pgid = getpgid(pid);
+    
+    if (pgid < 0) {
+        return kill(pid, SIGCONT);
     }
-    return -1;
+    
+    // Thaw everyone in the family
+    return killpg(pgid, SIGCONT);
 }
 
 bool os_is_on_ac_power() {
