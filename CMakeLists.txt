@@ -30,6 +30,11 @@ if(APPLE)
     
     # Link Mac Frameworks
     target_link_libraries(Cryo ${APP_SERVICES} ${CORE_FOUNDATION} ${IO_KIT})
+    
+    add_custom_command(TARGET Cryo POST_BUILD
+        COMMAND codesign --force --sign - "Cryo"
+        COMMENT "Signing Cryo to keep macOS permissions happy..."
+    )
 
 elseif(WIN32)
     message(STATUS "Build System: Detected Windows (NT Kernel)")
@@ -43,12 +48,6 @@ elseif(WIN32)
     # Link Windows Libraries
     target_link_libraries(Cryo kernel32 user32 psapi)
 
-if (APPLE)
-    add_custom_command(TARGET Cryo POST_BUILD
-        COMMAND codesign --force --sign - "${CMAKE_BINARY_DIR}/Cryo"
-        COMMENT "Signing Cryo to keep macOS permissions happy..."
-    )
-endif()
 
 else()
     message(FATAL_ERROR "OS not supported. This project only runs on macOS and Windows.")
