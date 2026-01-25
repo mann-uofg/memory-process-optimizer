@@ -651,7 +651,7 @@ void install_startup() {
   char exe_path[PATH_MAX];
   char plist_path[PATH_MAX];
 
-  // 1. Get where MacNap is currently sitting
+  // 1. Get where Cryo is currently sitting
   if (getcwd(exe_path, sizeof(exe_path)) == NULL)
     return;
 
@@ -884,7 +884,7 @@ int main(int argc, char *argv[]) {
 
         // If we see this 5 times in a row, ALERT THE USER.
         if (blind_counter > 4) {
-          printf(COLOR_RED "\n[CRITICAL ERROR] MACNAP IS BLIND!" COLOR_RESET
+          printf(COLOR_RED "\n[CRITICAL ERROR] Cryo IS BLIND!" COLOR_RESET
                            "\n");
           printf(COLOR_YELLOW
                  "  macOS is hiding app names (returning 'WindowManager').\n");

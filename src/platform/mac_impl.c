@@ -86,10 +86,10 @@ int os_freeze_process(int32_t pid) {
         return kill(pid, SIGSTOP);
     }
 
-    // Safety: Never freeze our own group (MacNap)!
+    // Safety: Never freeze our own group (Cryo)!
     // getpgid(0) returns the group of the calling process (us).
     if (pgid == getpgid(0)) { 
-        printf("[SAFETY] Prevented freezing of MacNap's own group.\n");
+        printf("[SAFETY] Prevented freezing of Cryo's own group.\n");
         return -1; 
     }
 

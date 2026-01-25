@@ -61,20 +61,20 @@ make
 
 Cryo now supports advanced command-line flags.
 
-| Command                        | Description                                                                 |
-|--------------------------------|-----------------------------------------------------------------------------|
-| `./Cryo`                     | Run in standard interactive mode                                           |
-| `../Cryo --daemon`          | Ghost Mode. Runs in the background and closes terminal                    |
-| `../Cryo --stop`            | Stops the background daemon safely                                         |
-| `../Cryo --reload`          | Forces the daemon to re-read cryo.conf and whitelist.txt                |
-| `../Cryo --dry-run`         | Simulation. Logs what would happen, but freezes nothing                   |
-| `../Cryo --setup`           | Forces the First-Run Configuration menu to appear                          |
+| Command              | Description                                              |
+| -------------------- | -------------------------------------------------------- |
+| `./Cryo`             | Run in standard interactive mode                         |
+| `../Cryo --daemon`   | Ghost Mode. Runs in the background and closes terminal   |
+| `../Cryo --stop`     | Stops the background daemon safely                       |
+| `../Cryo --reload`   | Forces the daemon to re-read cryo.conf and whitelist.txt |
+| `../Cryo --dry-run`  | Simulation. Logs what would happen, but freezes nothing  |
+| `../Cryo --setup`    | Forces the First-Run Configuration menu to appear        |
 
 ### ⚙️ Configuration
 
 **cryo.conf** Stores your threshold settings. You can edit this manually or use --setup.
 
-```
+```text
 Format: [TIMEOUT_SECONDS] [MIN_MEMORY_MB]
 Plaintext
 10 50
@@ -82,7 +82,7 @@ Plaintext
 
 **whitelist.txt** Add application names here (one per line) to protect them from freezing.
 
-```
+```text
 Plaintext
 Spotify
 Discord
@@ -92,7 +92,7 @@ Visual Studio Code
 
 ### 📂 Project Structure
 
-```
+```text
 memory_management/
 ├── CMakeLists.txt              # Cross-platform build script
 ├── cryo.conf                   # User Settings (Generated automatically)
