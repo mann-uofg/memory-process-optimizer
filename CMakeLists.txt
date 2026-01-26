@@ -20,16 +20,17 @@ if(APPLE)
     # --- FIX: Point to the correct file ---
     list(APPEND SOURCE_FILES src/platform/mac_impl.c)
     
-    # Find Frameworks (Including IOKit for Day 15)
+    # Find Frameworks (Including IOKit for Day 15, AppKit for Day 2.5)
     find_library(APP_SERVICES ApplicationServices)
     find_library(CORE_FOUNDATION CoreFoundation)
     find_library(IO_KIT IOKit)
+    find_library(APP_KIT AppKit)
     
     # Create the Executable
     add_executable(Cryo ${SOURCE_FILES})
     
     # Link Mac Frameworks
-    target_link_libraries(Cryo ${APP_SERVICES} ${CORE_FOUNDATION} ${IO_KIT})
+    target_link_libraries(Cryo ${APP_SERVICES} ${CORE_FOUNDATION} ${IO_KIT} ${APP_KIT})
     
     add_custom_command(TARGET Cryo POST_BUILD
         COMMAND codesign --force --sign - "Cryo"

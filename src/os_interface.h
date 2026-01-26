@@ -4,7 +4,6 @@
 #include <stdbool.h> // For bool, true, false
 #include <stddef.h>  // For size_t
 #include <stdint.h>  // For int32_t, uint64_t
-// Platform headers removed - moved to implementation files
 
 // Maximum length for a process name string
 #define MAX_PROC_NAME 256
