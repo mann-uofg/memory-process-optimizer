@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 // --- STATS FILE ---
-#define STATS_FILENAME "cryo.stats"
+#define STATS_FILENAME "cryo.stats.json"
 
 // --- CONFIGURATION DEFAULTS ---
 #define MAX_TRACKED_APPS 7
@@ -40,8 +40,9 @@ bool flag_energy_mode = false; // If true, only freeze when on battery
 #define COLOR_BOLD "\033[1m"    // Headers
 
 // Runtime Configuration
-int config_timeout = 10;    // seconds
-int config_min_memory = 50; // MB
+int config_timeout = 10;       // seconds
+int config_min_memory = 50;    // MB
+int config_poll_rate_ms = 900; // milliseconds (Default 0.9s)
 
 // Session Statistics
 int stats_frozen_count = 0;
@@ -68,13 +69,23 @@ typedef struct {
 
 AppState history[MAX_TRACKED_APPS];
 
-// --- LIVE STATS SYSTEM ---
+// --- LIVE STATS SYSTEM (JSON) ---
 void update_stats_file(time_t start_time) {
   FILE *f = fopen(STATS_FILENAME, "w");
   if (f) {
-    // Format: [START_TIME] [FROZEN_COUNT] [RAM_SAVED]
-    fprintf(f, "%ld %d %llu", start_time, stats_frozen_count,
-            stats_ram_saved_mb);
+    // Industry Standard JSON Format
+    // Format: { "uptime": 123, "frozen_count": 5, "ram_saved_mb": 1024,
+    // "pressure": 45 }
+    time_t now = time(NULL);
+    long uptime = (long)difftime(now, start_time);
+    int pressure = os_get_memory_pressure();
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"uptime\": %ld,\n", uptime);
+    fprintf(f, "  \"frozen_count\": %d,\n", stats_frozen_count);
+    fprintf(f, "  \"ram_saved_mb\": %llu,\n", stats_ram_saved_mb);
+    fprintf(f, "  \"system_pressure\": %d\n", pressure);
+    fprintf(f, "}\n");
     fclose(f);
   }
 }
@@ -126,7 +137,8 @@ void save_config() {
                         "\n");
     return;
   }
-  fprintf(f, "%d %d", config_timeout, config_min_memory);
+  fprintf(f, "%d %d %d", config_timeout, config_min_memory,
+          config_poll_rate_ms);
   fclose(f);
   printf(COLOR_CYAN "[DATA] Settings saved to '%s'" COLOR_RESET "\n",
          CONFIG_FILENAME);
@@ -137,7 +149,16 @@ bool load_config() {
   if (f == NULL)
     return false;
 
+  // Try reading 3 values (new format)
+  if (fscanf(f, "%d %d %d", &config_timeout, &config_min_memory,
+             &config_poll_rate_ms) == 3) {
+    fclose(f);
+    return true;
+  }
+  // Fallback: Try reading 2 values (old format)
+  rewind(f);
   if (fscanf(f, "%d %d", &config_timeout, &config_min_memory) == 2) {
+    config_poll_rate_ms = 900; // Default
     fclose(f);
     return true;
   }
@@ -398,9 +419,11 @@ void check_for_idlers() {
     int dynamic_threshold = config_min_memory; // Default (e.g. 50MB)
 
     if (pressure < 50) {
-      dynamic_threshold = 500;
+      dynamic_threshold = 500; // Relaxed: Only freeze huge apps
     } else if (pressure < 80) {
-      dynamic_threshold = 200;
+      dynamic_threshold = config_min_memory * 2; // Moderate
+    } else {
+      dynamic_threshold = config_min_memory; // Strict (User setting)
     }
 
     // 2. The Gatekeeper
@@ -602,27 +625,33 @@ void print_status_report() {
            "● RUNNING (Daemon Active)" COLOR_RESET "\n");
     printf("   PID:         %d\n", pid);
 
-    // Read the live stats
+    // Read the live stats (JSON Parsing Helper)
     FILE *f = fopen(STATS_FILENAME, "r");
     if (f) {
-      time_t start_time = 0;
+      char buffer[1024];
       int count = 0;
+      long uptime = 0;
       uint64_t ram = 0;
+      int pressure = 0;
 
-      if (fscanf(f, "%ld %d %llu", &start_time, &count, &ram) == 3) {
-        // Calculate Uptime
-        time_t now = time(NULL);
-        double uptime_sec = difftime(now, start_time);
-        int hours = (int)uptime_sec / 3600;
-        int minutes = ((int)uptime_sec % 3600) / 60;
-
-        printf("   Uptime:      %dh %dm\n", hours, minutes);
-        printf("   Apps Frozen: %d\n", count);
-        printf("   RAM Saved:   " COLOR_CYAN "%llu MB" COLOR_RESET "\n", ram);
+      // Very simple JSON parser for our specific format
+      while (fgets(buffer, sizeof(buffer), f)) {
+        if (strstr(buffer, "\"uptime\":"))
+          sscanf(buffer, "  \"uptime\": %ld,", &uptime);
+        if (strstr(buffer, "\"frozen_count\":"))
+          sscanf(buffer, "  \"frozen_count\": %d,", &count);
+        if (strstr(buffer, "\"ram_saved_mb\":"))
+          sscanf(buffer, "  \"ram_saved_mb\": %llu,", &ram);
+        if (strstr(buffer, "\"system_pressure\":"))
+          sscanf(buffer, "  \"system_pressure\": %d", &pressure);
       }
 
-      // Show pressure
-      int pressure = os_get_memory_pressure();
+      int hours = (int)uptime / 3600;
+      int minutes = ((int)uptime % 3600) / 60;
+
+      printf("   Uptime:      %dh %dm\n", hours, minutes);
+      printf("   Apps Frozen: %d\n", count);
+      printf("   RAM Saved:   " COLOR_CYAN "%llu MB" COLOR_RESET "\n", ram);
       printf("   Sys Pressure:" COLOR_YELLOW " %d%%" COLOR_RESET "\n",
              pressure);
       fclose(f);
@@ -835,6 +864,12 @@ int main(int argc, char *argv[]) {
     else
       clear_input_buffer();
 
+    printf("[3] Enter Poll Rate (ms) [Default: 900]: ");
+    if (scanf("%d", &input_val) == 1 && input_val > 100)
+      config_poll_rate_ms = input_val;
+    else
+      clear_input_buffer();
+
     save_config();
   }
 
@@ -914,7 +949,7 @@ int main(int argc, char *argv[]) {
     check_for_idlers();
     manage_throttled_apps();
     update_stats_file(session_start_time);
-    sleep_ms(900);
+    sleep_ms(config_poll_rate_ms);
   }
   return 0;
 }
