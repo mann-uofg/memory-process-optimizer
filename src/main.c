@@ -21,6 +21,9 @@
 // --- PID FILE ---
 #define PID_FILENAME "cryo.pid"
 
+// --- STATE FILE (CRASH RECOVERY) ---
+#define STATE_FILENAME "cryo.state"
+
 // Whitelist Settings
 #define WHITELIST_FILENAME "whitelist.txt"
 #define MAX_WHITELIST_ITEMS 20
@@ -66,6 +69,9 @@ typedef struct {
   bool valid;
   bool is_throttled;
 } AppState;
+
+// --- PROTOTYPES ---
+void write_log(const char *level, const char *message);
 
 AppState history[MAX_TRACKED_APPS];
 
@@ -164,7 +170,79 @@ bool load_config() {
   }
 
   fclose(f);
+  fclose(f);
   return false;
+}
+
+// --- STATE MANAGEMENT (CRASH RECOVERY) ---
+void save_state(int pid) {
+  FILE *f = fopen(STATE_FILENAME, "a");
+  if (f) {
+    fprintf(f, "%d\n", pid);
+    fclose(f);
+  }
+}
+
+void remove_state(int pid) {
+  // Read all PIDs
+  FILE *f = fopen(STATE_FILENAME, "r");
+  if (!f)
+    return;
+
+  int pids[MAX_TRACKED_APPS * 2]; // Safety buffer
+  int count = 0;
+  int temp_pid;
+
+  while (fscanf(f, "%d", &temp_pid) == 1) {
+    if (temp_pid != pid && count < (MAX_TRACKED_APPS * 2)) {
+      pids[count++] = temp_pid;
+    }
+  }
+  fclose(f);
+
+  // Rewrite file
+  f = fopen(STATE_FILENAME, "w");
+  if (f) {
+    for (int i = 0; i < count; i++) {
+      fprintf(f, "%d\n", pids[i]);
+    }
+    fclose(f);
+  }
+}
+
+void recover_state() {
+  FILE *f = fopen(STATE_FILENAME, "r");
+  if (!f)
+    return;
+
+  printf(COLOR_YELLOW
+         "[RECOVERY] Checking for orphaned frozen apps..." COLOR_RESET "\n");
+
+  int pid;
+  int recovered_count = 0;
+  while (fscanf(f, "%d", &pid) == 1) {
+    if (pid > 0 && is_process_running(pid)) {
+      printf(COLOR_GREEN "   > Thawing orphan PID %d" COLOR_RESET "\n", pid);
+      os_thaw_process(pid); // Thaw immediately
+      recovered_count++;
+
+      char log_msg[128];
+      snprintf(log_msg, sizeof(log_msg), "Recovered/Thawed Orphan PID %d", pid);
+      write_log("RECOVERY", log_msg);
+    }
+  }
+  fclose(f);
+
+  // Wipe the state file now that we are clean
+  remove(STATE_FILENAME);
+
+  if (recovered_count > 0) {
+    printf(COLOR_CYAN
+           "[RECOVERY] Restored %d apps from previous crash." COLOR_RESET "\n",
+           recovered_count);
+  } else {
+    printf("[RECOVERY] System Clean.\n");
+  }
 }
 
 // --- WHITELIST LOADER ---
@@ -273,6 +351,7 @@ void perform_speculative_thaw() {
     if (history[i].valid && history[i].is_frozen) {
       // Unfreeze everything so the user can enter
       os_thaw_process(history[i].pid);
+      remove_state(history[i].pid); // PERSISTENCE
       history[i].is_frozen = false;
 
       // Reset timer
@@ -322,6 +401,7 @@ void update_app_activity(int32_t pid) {
                "\n",
                history[i].name, pid);
         os_thaw_process(pid);
+        remove_state(pid); // PERSISTENCE
         history[i].is_frozen = false;
 
         char log_msg[128];
@@ -342,6 +422,7 @@ void update_app_activity(int32_t pid) {
                         "Thawing first..." COLOR_RESET "\n",
            history[next_slot].name, history[next_slot].pid);
     os_thaw_process(history[next_slot].pid);
+    remove_state(history[next_slot].pid); // PERSISTENCE
     history[next_slot].is_frozen = false;
   }
 
@@ -466,6 +547,7 @@ void check_for_idlers() {
                history[i].name);
         history[i].is_throttled = false;
         os_thaw_process(history[i].pid); // Ensure it's fully awake
+        remove_state(history[i].pid);    // PERSISTENCE (Just in case)
         history[i].is_frozen = false;
       }
     }
@@ -497,6 +579,7 @@ void check_for_idlers() {
 
       if (os_freeze_process(history[i].pid) == 0) {
         history[i].is_frozen = true;
+        save_state(history[i].pid); // PERSISTENCE
 
         // Update Statistics
         stats_frozen_count++;
@@ -546,6 +629,7 @@ void handle_exit(int sig) {
 
   write_log("SYSTEM", "ENGINE STOPPED.");
   remove_pid_file();
+  remove(STATE_FILENAME); // Clean exit = clear state
 
   exit(0);
 }
@@ -821,6 +905,8 @@ int main(int argc, char *argv[]) {
   }
 
   // before starting, check if already running
+  recover_state(); // CRASH RECOVERY CHECK
+
   int existing_pid = get_running_pid();
   if (existing_pid > 0 && is_process_running(existing_pid)) {
     printf(COLOR_RED "[ERROR] Cryo is already running (PID %d)!" COLOR_RESET
