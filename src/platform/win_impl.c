@@ -53,6 +53,15 @@ uint64_t os_get_memory_usage(int32_t pid) {
   return mem_usage;
 }
 
+// Stub for cross-platform compatibility
+uint64_t os_get_swap_usage(void) { return 0; }
+// Stub for cross-platform compatibility
+int os_get_memory_pressure(void) { return 0; }
+// Stub for cross-platform compatibility
+bool os_is_on_ac_power(void) { return true; }
+// Stub for cross-platform compatibility
+bool os_has_power_assertion(int32_t pid) { return false; }
+
 // --- THE HARD PART: FREEZE & THAW ---
 
 // Helper function to iterate threads and toggle them

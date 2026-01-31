@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/sysctl.h> // For swap usage
+
 // --- 1. WINDOW DETECTION (NSWorkspace via Obj-C Runtime) ---
 // We use the Runtime to avoid compiling as Objective-C (.m)
 // This accesses [NSWorkspace
@@ -173,6 +175,16 @@ int os_get_memory_pressure() {
 
   // Return percentage used
   return (int)((active_pages * 100) / total_pages);
+}
+
+uint64_t os_get_swap_usage(void) {
+  struct xsw_usage vmusage = {0};
+  size_t size = sizeof(vmusage);
+
+  if (sysctlbyname("vm.swapusage", &vmusage, &size, NULL, 0) == 0) {
+    return vmusage.xsu_used;
+  }
+  return 0;
 }
 
 // --- ASSERTION CHECK ---

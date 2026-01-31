@@ -46,6 +46,8 @@ bool flag_energy_mode = false; // If true, only freeze when on battery
 int config_timeout = 10;       // seconds
 int config_min_memory = 50;    // MB
 int config_poll_rate_ms = 900; // milliseconds (Default 0.9s)
+// Day 5 Features
+bool config_auto_energy = true; // Auto-switch based on AC/Battery
 
 // Session Statistics
 int stats_frozen_count = 0;
@@ -90,7 +92,11 @@ void update_stats_file(time_t start_time) {
     fprintf(f, "  \"uptime\": %ld,\n", uptime);
     fprintf(f, "  \"frozen_count\": %d,\n", stats_frozen_count);
     fprintf(f, "  \"ram_saved_mb\": %llu,\n", stats_ram_saved_mb);
-    fprintf(f, "  \"system_pressure\": %d\n", pressure);
+    fprintf(f, "  \"system_pressure\": %d,\n", pressure);
+    fprintf(f, "  \"swap_used_mb\": %llu,\n",
+            os_get_swap_usage() / (1024 * 1024));
+    fprintf(f, "  \"power_source\": \"%s\"\n",
+            os_is_on_ac_power() ? "AC" : "Battery");
     fprintf(f, "}\n");
     fclose(f);
   }
@@ -469,16 +475,31 @@ void manage_throttled_apps() {
 }
 
 void check_for_idlers() {
-  // --- DAY 15: POWER CHECK ---
-  if (flag_energy_mode) {
-    if (os_is_on_ac_power()) {
-      // We are plugged in, skip freezing
-      return;
-    }
-  }
-
   time_t now = time(NULL);
   int32_t active_pid = os_get_active_pid();
+
+  // --- DAY 5: ENVIRONMENT AWARENESS ---
+  bool is_ac = os_is_on_ac_power();
+  uint64_t swap_bytes = os_get_swap_usage();
+  int pressure = os_get_memory_pressure();
+
+  // Power Logic
+  int current_timeout = config_timeout;
+
+  if (config_auto_energy && !is_ac) {
+    current_timeout = 5; // Aggressive on Battery
+    flag_energy_mode = true;
+  } else {
+    flag_energy_mode = false;
+  }
+
+  // Swap Logic (Emergency Override)
+  bool swap_emergency = (swap_bytes > 1024 * 1024 * 1024); // > 1GB Swap
+  if (swap_emergency) {
+    // Freeze almost everything
+    pressure = 100; // Fake high pressure
+  }
+  // ------------------------------------
 
   for (int i = 0; i < MAX_TRACKED_APPS; i++) {
     if (!history[i].valid)
@@ -560,7 +581,7 @@ void check_for_idlers() {
     double seconds_inactive = difftime(now, history[i].last_active_time);
 
     // 3. The Timeout
-    if (seconds_inactive > config_timeout) {
+    if (seconds_inactive > current_timeout) {
       if (flag_dry_run) {
         printf(COLOR_YELLOW "[DRY-RUN] Would have frozen %s (PID %d). Saving "
                             "%.0f MB." COLOR_RESET "\n",
@@ -636,20 +657,18 @@ void handle_exit(int sig) {
 
 // HOT RELOAD
 void handle_reload(int sig) {
+  // Reload whitelist
+  load_whitelist();
+
   printf(COLOR_CYAN
          "\n[SIGNAL] Received SIGHUP. Reloading configuration..." COLOR_RESET
          "\n");
   write_log("SYSTEM", "Reloading Configuration (Hot Swap)");
-
-  // Reload config
-  load_config();
-  // Reload whitelist
-  load_whitelist();
-
-  // we cant easily change the timeout logic mid-loop,
-  // but the variables config_timeout and config_min_memory
-  // update instantly for the NEXT check.
 }
+
+// we cant easily change the timeout logic mid-loop,
+// but the variables config_timeout and config_min_memory
+// update instantly for the NEXT check.
 
 // --- Daemonizer ---
 void daemonize() {
@@ -752,7 +771,6 @@ void print_status_report() {
     printf("   State:       " COLOR_RED "● STOPPED" COLOR_RESET "\n");
     printf("   To start:    ./Cryo --daemon\n");
   }
-  printf("========================================\n\n");
 }
 
 void get_plist_path(char *buffer, size_t size) {
@@ -1032,9 +1050,48 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    // --- DASHBOARD UI (Day 5) ---
+    if (!run_as_daemon && !flag_dry_run) {
+      printf("\033[2J\033[H"); // Clear Screen
+      printf(COLOR_BOLD "========================================\n");
+      printf("   Cryo DASHBOARD ⚡\n");
+      printf("========================================\n" COLOR_RESET);
+
+      bool is_ac = os_is_on_ac_power();
+      int pressure = os_get_memory_pressure();
+      uint64_t swap = os_get_swap_usage() / (1024 * 1024);
+
+      printf("   Power:    %s\n", is_ac ? COLOR_GREEN "AC Power" COLOR_RESET
+                                        : COLOR_YELLOW
+                                      "Battery (Energy Mode)" COLOR_RESET);
+      printf("   Pressure: %d%% %s\n", pressure,
+             pressure > 50 ? "(High)" : "(Normal)");
+      printf("   Swap:     %llu MB\n", swap);
+      printf("   Saved:    " COLOR_CYAN "%llu MB" COLOR_RESET " (frozen: %d)\n",
+             stats_ram_saved_mb, stats_frozen_count);
+      printf("----------------------------------------\n");
+
+      // Grouped Processes Visual
+      printf("   [ Active Process List ]\n");
+      for (int i = 0; i < MAX_TRACKED_APPS; i++) {
+        if (history[i].valid) {
+          char *state = history[i].is_frozen ? COLOR_CYAN "❄️ Frozen" COLOR_RESET
+                                             : COLOR_GREEN
+                            "● Active" COLOR_RESET;
+          if (history[i].is_throttled)
+            state = COLOR_YELLOW "⏱ Throttled" COLOR_RESET;
+
+          printf("   %-20s %s\n", history[i].name, state);
+        }
+      }
+      printf("\n   (Ctrl+C to Stop)\n");
+    } else {
+      // Log mode (Daemon or Dry Run)
+      update_stats_file(session_start_time);
+    }
+
     check_for_idlers();
     manage_throttled_apps();
-    update_stats_file(session_start_time);
     sleep_ms(config_poll_rate_ms);
   }
   return 0;

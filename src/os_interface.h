@@ -59,10 +59,11 @@ int os_thaw_process(int32_t pid);
  */
 uint64_t os_get_memory_usage(int32_t pid);
 
+// --- SYSTEM METRICS ---
+int os_get_memory_pressure(void);
+uint64_t os_get_swap_usage(void); // Returns swap used in bytes
 // Returns true if plugged into wall (AC), false if on battery
-bool os_is_on_ac_power();
-
-int os_get_memory_pressure();
+bool os_is_on_ac_power(void);
 
 // returns true if the process is preventing sleep (audio/video/rendering)
 bool os_has_power_assertion(int32_t pid);
