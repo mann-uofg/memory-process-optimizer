@@ -187,6 +187,32 @@ uint64_t os_get_swap_usage(void) {
   return 0;
 }
 
+double os_get_cpu_usage(int32_t pid) {
+  struct proc_taskinfo pti;
+  int ret = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &pti, sizeof(pti));
+  if (ret <= 0)
+    return 0.0;
+
+  // This is "CPU time total" / "Run time total" since start.
+  // It's an average, not instantaneous, but good enough to detect
+  // heavy workers like renders vs idle apps.
+  // Time in nanoseconds
+  double total_time = (double)pti.pti_total_system + (double)pti.pti_total_user;
+  if (total_time < 0.1)
+    return 0.0;
+
+  // We would need previous sample to get instantaneous load.
+  // For now, checks if the process has accumulated significant time recently
+  // is hard without state.
+  // ALTERNATIVE: Just check if it's "runnable" state?
+  // Let's stick to a placeholder returning 0 until we add stateful monitoring.
+  // ACTUALLY: Let's use the memory pressure + assertion check instead for now,
+  // as instantaneous CPU is hard in C without a monitoring thread per app.
+
+  // Implementation for Day 6: Simple "Running" check
+  return 0.0; // Placeholder until Day 7 Refactor
+}
+
 // --- ASSERTION CHECK ---
 bool os_has_power_assertion(int32_t pid) {
   CFDictionaryRef assertions = NULL;

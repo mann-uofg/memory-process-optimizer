@@ -56,6 +56,8 @@ uint64_t os_get_memory_usage(int32_t pid) {
 // Stub for cross-platform compatibility
 uint64_t os_get_swap_usage(void) { return 0; }
 // Stub for cross-platform compatibility
+double os_get_cpu_usage(int32_t pid) { return 0.0; }
+// Stub for cross-platform compatibility
 int os_get_memory_pressure(void) { return 0; }
 // Stub for cross-platform compatibility
 bool os_is_on_ac_power(void) { return true; }

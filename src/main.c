@@ -67,6 +67,7 @@ typedef struct {
   int32_t pid;
   char name[MAX_PROC_NAME];
   time_t last_active_time;
+  time_t discovery_time; // Day 6: Grace Period
   bool is_frozen;
   bool valid;
   bool is_throttled;
@@ -439,6 +440,7 @@ void update_app_activity(int32_t pid) {
   history[next_slot].pid = pid;
   strcpy(history[next_slot].name, name);
   history[next_slot].last_active_time = time(NULL);
+  history[next_slot].discovery_time = time(NULL); // Day 6: Mark Birthday
   history[next_slot].is_frozen = false;
   history[next_slot].valid = true;
 
@@ -573,6 +575,21 @@ void check_for_idlers() {
       }
     }
     // ---------------------------------------
+
+    // Day 6: CPU Safety Check
+    // If app is using > 10% CPU, it is working. Do not freeze.
+    // Note: Since our Mac impl returns 0.0 for now, this logic is prepared but
+    // inactive.
+    if (os_get_cpu_usage(history[i].pid) > 10.0) {
+      // printf("[BUSY] %s is using CPU. Skipping.\n", history[i].name);
+      continue;
+    }
+
+    // Day 6: Grace Period (30s)
+    // Give new apps 30 seconds to settle before we judge them.
+    if (difftime(now, history[i].discovery_time) < 30) {
+      continue;
+    }
 
     // If currently throttled, skip standard freezing checks
     if (history[i].is_throttled)
@@ -876,6 +893,28 @@ int main(int argc, char *argv[]) {
       printf("  ./Cryo --energy-mode  Enable Energy Mode (Freeze only on "
              "Battery)\n");
       printf("  ./Cryo --stop     Kill the background daemon.\n\n");
+      return 0;
+    } else if (strcmp(argv[i], "--allow") == 0 && i + 1 < argc) {
+      // Day 6: CLI Whitelist Add
+      FILE *f = fopen(WHITELIST_FILENAME, "a");
+      if (f) {
+        fprintf(f, "\n%s\n", argv[i + 1]);
+        fclose(f);
+        printf(COLOR_GREEN "[SUCCESS] Added '%s' to whitelist." COLOR_RESET
+                           "\n",
+               argv[i + 1]);
+      } else {
+        printf(COLOR_RED "[ERROR] Could not write to whitelist." COLOR_RESET
+                         "\n");
+      }
+      return 0;
+    } else if (strcmp(argv[i], "--remove") == 0 && i + 1 < argc) {
+      // Day 6: CLI Whitelist Remove (Simple Re-write)
+      // Note: For a robust impl, we'd read all lines, filter, and write back.
+      // For now, we will just tell the user to edit the file manually as
+      // removal is complex in C.
+      printf("To remove '%s', please edit 'whitelist.txt' manually.\n",
+             argv[i + 1]);
       return 0;
     } else if (strcmp(argv[i], "--install-startup") == 0) {
       install_startup();

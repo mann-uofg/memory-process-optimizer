@@ -61,7 +61,8 @@ uint64_t os_get_memory_usage(int32_t pid);
 
 // --- SYSTEM METRICS ---
 int os_get_memory_pressure(void);
-uint64_t os_get_swap_usage(void); // Returns swap used in bytes
+uint64_t os_get_swap_usage(void);     // Returns swap used in bytes
+double os_get_cpu_usage(int32_t pid); // Returns % CPU usage (0.0 - 100.0)
 // Returns true if plugged into wall (AC), false if on battery
 bool os_is_on_ac_power(void);
 
